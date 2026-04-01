@@ -140,10 +140,17 @@ export const handler: Handler = async (event) => {
   )
 
   if (!hasDb && !hasSmtp && !hasResend) {
-    console.error('Weder Supabase noch E-Mail-Versand konfiguriert')
+    console.error('Konfiguration fehlt', {
+      hasDb,
+      hasSmtp,
+      hasResend,
+      mailUserSet: Boolean(process.env.MAIL_USER),
+      mailPassSet: Boolean(process.env.MAIL_PASSWORD),
+    })
     return json(503, {
       ok: false,
-      error: 'Antrag derzeit nicht möglich (Server-Konfiguration).',
+      error:
+        'Server-Konfiguration: In Netlify unter Environment variables mindestens MAIL_USER und MAIL_PASSWORD setzen (oder Supabase URL + Service Role), Scope „Production“ wählen und Site neu deployen.',
     })
   }
 
