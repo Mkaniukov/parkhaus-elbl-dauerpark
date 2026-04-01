@@ -132,7 +132,9 @@ export const handler: Handler = async (event) => {
 
   const data = parsed.data
   const supabaseUrl = process.env.SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  /** Legacy name + neuer Name „Secret“ im Supabase-Dashboard */
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY
   const hasDb = Boolean(supabaseUrl && serviceKey)
   const hasSmtp = Boolean(process.env.MAIL_USER && process.env.MAIL_PASSWORD)
   const hasResend = Boolean(
@@ -152,6 +154,12 @@ export const handler: Handler = async (event) => {
       error:
         'Server-Konfiguration: In Netlify unter Environment variables mindestens MAIL_USER und MAIL_PASSWORD setzen (oder Supabase URL + Service Role), Scope „Production“ wählen und Site neu deployen.',
     })
+  }
+
+  if (hasSmtp && !hasDb) {
+    console.warn(
+      'Supabase: INSERT übersprungen — SUPABASE_URL und/oder SUPABASE_SERVICE_ROLE_KEY (oder SUPABASE_SECRET_KEY) fehlen in den Function-Umgebungsvariablen. E-Mail wird trotzdem gesendet.',
+    )
   }
 
   if (hasDb) {
