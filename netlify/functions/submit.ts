@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import nodemailer from 'nodemailer'
 import { applicationPayloadSchema, type ApplicationPayload } from '../../src/lib/schema'
 import { GARAGEN, TARIFE } from '../../src/lib/constants'
 
@@ -47,6 +48,36 @@ function buildEmailHtml(payload: ApplicationPayload): string {
     )
     .join('')
   return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table></body></html>`
+}
+
+/** Google Workspace / Gmail SMTP (App-Passwort ohne Leerzeichen). */
+async function sendSmtpEmail(html: string, subject: string) {
+  const host = process.env.MAIL_HOST ?? 'smtp.gmail.com'
+  const port = Number(process.env.MAIL_PORT ?? '465')
+  const secure =
+    process.env.MAIL_SECURE === 'true'
+      ? true
+      : process.env.MAIL_SECURE === 'false'
+        ? false
+        : port === 465
+  const user = process.env.MAIL_USER!
+  const pass = process.env.MAIL_PASSWORD!.replace(/\s+/g, '')
+  const from =
+    process.env.MAIL_FROM ?? `Parkhaus ELBL <${user}>`
+  const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+  })
+  await transporter.sendMail({
+    from,
+    to,
+    subject,
+    html,
+  })
 }
 
 async function sendResendEmail(html: string, subject: string) {
@@ -103,12 +134,13 @@ export const handler: Handler = async (event) => {
   const supabaseUrl = process.env.SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const hasDb = Boolean(supabaseUrl && serviceKey)
+  const hasSmtp = Boolean(process.env.MAIL_USER && process.env.MAIL_PASSWORD)
   const hasResend = Boolean(
     process.env.RESEND_API_KEY && process.env.NOTIFY_FROM,
   )
 
-  if (!hasDb && !hasResend) {
-    console.error('Weder Supabase noch Resend konfiguriert')
+  if (!hasDb && !hasSmtp && !hasResend) {
+    console.error('Weder Supabase noch E-Mail-Versand konfiguriert')
     return json(503, {
       ok: false,
       error: 'Antrag derzeit nicht möglich (Server-Konfiguration).',
@@ -140,19 +172,19 @@ export const handler: Handler = async (event) => {
     }
   }
 
-  if (hasResend) {
-    try {
-      const html = buildEmailHtml(data)
-      await sendResendEmail(
-        html,
-        `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`,
-      )
-    } catch (e) {
-      console.error(e)
-      return json(500, { ok: false, error: 'E-Mail konnte nicht gesendet werden.' })
+  try {
+    const html = buildEmailHtml(data)
+    const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
+    if (hasSmtp) {
+      await sendSmtpEmail(html, subj)
+    } else if (hasResend) {
+      await sendResendEmail(html, subj)
+    } else {
+      console.warn('Kein E-Mail-Versand konfiguriert — nur Datenbank')
     }
-  } else {
-    console.warn('Resend nicht konfiguriert — nur Datenbank')
+  } catch (e) {
+    console.error(e)
+    return json(500, { ok: false, error: 'E-Mail konnte nicht gesendet werden.' })
   }
 
   return json(200, { ok: true })
