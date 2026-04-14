@@ -1,16 +1,18 @@
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useEffect, useState } from 'react'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   applicationPayloadSchema,
   type ApplicationFormInput,
 } from '../lib/schema'
 import {
+  DEFAULT_GARAGE_ID,
+  DEFAULT_TARIF_ID,
   GARAGEN,
+  getTarifeForGarage,
   KAUTION_EUR,
   KUENDIGUNG_HINWEIS,
   MIN_VERTRAG_MONATE,
-  TARIFE,
 } from '../lib/constants'
 
 const defaultValues: ApplicationFormInput = {
@@ -24,8 +26,8 @@ const defaultValues: ApplicationFormInput = {
   iban: '',
   bic: '',
   lautend_auf: '',
-  tarif: 'mw-fr-350',
-  garage: '1010-posthoefe',
+  tarif: DEFAULT_TARIF_ID,
+  garage: DEFAULT_GARAGE_ID,
   agb_akzeptiert: false,
   sepa_akzeptiert: false,
   datenschutz_akzeptiert: false,
@@ -48,12 +50,29 @@ export function ApplicationForm() {
   const {
     register,
     handleSubmit,
+    control,
+    setValue,
+    getValues,
     formState: { errors },
     reset,
   } = useForm<ApplicationFormInput>({
     resolver: zodResolver(applicationPayloadSchema),
     defaultValues,
   })
+
+  const garageWatch = useWatch({ control, name: 'garage' })
+  const tarifeAktuell = getTarifeForGarage(garageWatch ?? DEFAULT_GARAGE_ID)
+
+  useEffect(() => {
+    const gid = garageWatch ?? DEFAULT_GARAGE_ID
+    const list = getTarifeForGarage(gid)
+    const first = list[0]?.id
+    if (!first) return
+    const current = getValues('tarif')
+    if (!list.some((t) => t.id === current)) {
+      setValue('tarif', first, { shouldValidate: true })
+    }
+  }, [garageWatch, getValues, setValue])
 
   const onSubmit = handleSubmit(async (data) => {
     setStatus('loading')
@@ -164,7 +183,7 @@ export function ApplicationForm() {
         <label className="field">
           <span>Tarif *</span>
           <select {...register('tarif')}>
-            {TARIFE.map((t) => (
+            {tarifeAktuell.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label} — {t.detail}
               </option>

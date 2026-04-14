@@ -2,7 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import nodemailer from 'nodemailer'
 import { applicationPayloadSchema, type ApplicationPayload } from '../../src/lib/schema'
-import { GARAGEN, TARIFE } from '../../src/lib/constants'
+import { GARAGEN, formatTarifLine } from '../../src/lib/constants'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -16,10 +16,6 @@ function json(statusCode: number, body: object) {
     headers: { 'Content-Type': 'application/json', ...corsHeaders },
     body: JSON.stringify(body),
   }
-}
-
-function tarifLabel(id: string): string {
-  return TARIFE.find((t) => t.id === id)?.label ?? id
 }
 
 function garageLabel(id: string): string {
@@ -36,7 +32,7 @@ function buildEmailHtml(payload: ApplicationPayload): string {
     ['Garage', garageLabel(payload.garage)],
     ['Fahrzeug', payload.fahrzeug],
     ['Kennzeichen', payload.kennzeichen],
-    ['Tarif', tarifLabel(payload.tarif)],
+    ['Tarif', formatTarifLine(payload.tarif)],
     ['IBAN', payload.iban],
     ['BIC', payload.bic ?? '—'],
     ['Lautend auf', payload.lautend_auf],

@@ -1,8 +1,12 @@
 import { z } from 'zod'
-import { GARAGEN, TARIFE } from './constants'
+import { GARAGEN, getTarifeForGarage } from './constants'
 
-const tarifIds = TARIFE.map((t) => t.id) as [string, ...string[]]
 const garageIds = GARAGEN.map((g) => g.id) as [string, ...string[]]
+
+const allTarifIds = GARAGEN.flatMap((g) => g.tarife.map((t) => t.id)) as [
+  string,
+  ...string[],
+]
 
 function normalizeIban(raw: string): string {
   return raw.replace(/\s+/g, '').toUpperCase()
@@ -15,35 +19,46 @@ const ibanAt = z
   .transform(normalizeIban)
   .refine((v) => /^AT\d{18}$/.test(v), 'Ungültige österreichische IBAN')
 
-export const applicationPayloadSchema = z.object({
-  name_firma: z.string().min(2, 'Name oder Firma angeben'),
-  adresse: z.string().min(4, 'Vollständige Adresse'),
-  telefon: z.string().min(5, 'Telefonnummer'),
-  email: z.string().email('Gültige E-Mail'),
-  beginn: z.string().min(1, 'Beginn wählen'),
-  fahrzeug: z.string().min(2, 'Fahrzeug (Marke / Typ)'),
-  kennzeichen: z.string().min(2, 'Kennzeichen'),
-  iban: ibanAt,
-  bic: z
-    .string()
-    .optional()
-    .transform((s) => {
-      const t = s?.trim()
-      return t ? t.toUpperCase() : undefined
-    }),
-  lautend_auf: z.string().min(2, 'Kontoinhaber / lautend auf'),
-  tarif: z.enum(tarifIds),
-  garage: z.enum(garageIds),
-  agb_akzeptiert: z
-    .boolean()
-    .refine((v) => v === true, 'AGB müssen akzeptiert werden'),
-  sepa_akzeptiert: z
-    .boolean()
-    .refine((v) => v === true, 'SEPA-Lastschrift muss akzeptiert werden'),
-  datenschutz_akzeptiert: z
-    .boolean()
-    .refine((v) => v === true, 'Datenschutzerklärung muss akzeptiert werden'),
-})
+export const applicationPayloadSchema = z
+  .object({
+    name_firma: z.string().min(2, 'Name oder Firma angeben'),
+    adresse: z.string().min(4, 'Vollständige Adresse'),
+    telefon: z.string().min(5, 'Telefonnummer'),
+    email: z.string().email('Gültige E-Mail'),
+    beginn: z.string().min(1, 'Beginn wählen'),
+    fahrzeug: z.string().min(2, 'Fahrzeug (Marke / Typ)'),
+    kennzeichen: z.string().min(2, 'Kennzeichen'),
+    iban: ibanAt,
+    bic: z
+      .string()
+      .optional()
+      .transform((s) => {
+        const t = s?.trim()
+        return t ? t.toUpperCase() : undefined
+      }),
+    lautend_auf: z.string().min(2, 'Kontoinhaber / lautend auf'),
+    tarif: z.enum(allTarifIds),
+    garage: z.enum(garageIds),
+    agb_akzeptiert: z
+      .boolean()
+      .refine((v) => v === true, 'AGB müssen akzeptiert werden'),
+    sepa_akzeptiert: z
+      .boolean()
+      .refine((v) => v === true, 'SEPA-Lastschrift muss akzeptiert werden'),
+    datenschutz_akzeptiert: z
+      .boolean()
+      .refine((v) => v === true, 'Datenschutzerklärung muss akzeptiert werden'),
+  })
+  .superRefine((data, ctx) => {
+    const allowed = new Set(getTarifeForGarage(data.garage).map((t) => t.id))
+    if (!allowed.has(data.tarif)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Tarif passt nicht zur gewählten Garage.',
+        path: ['tarif'],
+      })
+    }
+  })
 
 export type ApplicationPayload = z.infer<typeof applicationPayloadSchema>
 /** Rohdaten aus dem Formular (vor IBAN-/BIC-Normalisierung). */
