@@ -12,3 +12,5 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+  # docx bricht bei reiner esbuild-Bündelung oft; als Node-Modul mitliefern
+  external_node_modules = ["docx"]

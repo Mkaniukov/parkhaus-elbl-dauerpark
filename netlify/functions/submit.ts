@@ -138,6 +138,18 @@ async function sendResendEmail(
 }
 
 export const handler: Handler = async (event) => {
+  try {
+    return await handleSubmit(event)
+  } catch (err) {
+    console.error('submit: unhandled', err)
+    return json(500, {
+      ok: false,
+      error: 'Interner Serverfehler. Bitte Netlify Function-Logs prüfen.',
+    })
+  }
+}
+
+async function handleSubmit(event: Parameters<Handler>[0]) {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers: corsHeaders, body: '' }
   }
@@ -215,7 +227,12 @@ export const handler: Handler = async (event) => {
       datenschutz_akzeptiert: data.datenschutz_akzeptiert,
     })
     if (error) {
-      console.error('Supabase insert', error)
+      console.error('Supabase insert', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      })
       return json(500, { ok: false, error: 'Speichern fehlgeschlagen.' })
     }
   }
