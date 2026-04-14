@@ -1,0 +1,117 @@
+/* Nur für Druck / PDF-Speichern; am Bildschirm versteckt */
+.contract-print-root {
+  position: absolute;
+  left: -12000px;
+  top: 0;
+  width: 190mm;
+  max-width: 100%;
+  box-sizing: border-box;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 10.5pt;
+  line-height: 1.35;
+  color: #000;
+  background: #fff;
+}
+
+.contract-page {
+  page-break-after: always;
+}
+
+.contract-page:last-child {
+  page-break-after: auto;
+}
+
+.contract-page--1 h1 {
+  font-size: 11pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 0.75rem;
+}
+
+.contract-page--1 .contract-block {
+  margin-bottom: 0.65rem;
+}
+
+.contract-page--1 .contract-block p {
+  margin: 0 0 0.35rem;
+}
+
+.contract-meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 10pt;
+}
+
+.contract-meta-table td {
+  vertical-align: top;
+  padding: 0.15rem 0.35rem 0.15rem 0;
+}
+
+.contract-meta-table td:first-child {
+  font-weight: 600;
+  white-space: nowrap;
+  width: 38%;
+}
+
+.contract-nutzung {
+  font-weight: 600;
+  margin: 0.5rem 0;
+}
+
+.contract-kaution {
+  margin: 0.35rem 0 0.6rem;
+}
+
+.contract-pkw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10pt;
+  margin: 0.35rem 0 0.75rem;
+}
+
+.contract-pkw-table th,
+.contract-pkw-table td {
+  border: 1px solid #000;
+  padding: 0.35rem 0.45rem;
+  text-align: left;
+}
+
+.contract-entgelt-box {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid #ccc;
+}
+
+.contract-entgelt-box p {
+  margin: 0 0 0.4rem;
+}
+
+.contract-legal-pre {
+  margin: 0;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 9.5pt;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.contract-hinweis-klein {
+  font-size: 9pt;
+  color: #333;
+  margin-top: 0.75rem;
+}
+
+@media print {
+  .contract-print-root {
+    position: static;
+    left: auto;
+    width: 100%;
+  }
+
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+}

@@ -8,6 +8,8 @@ export type TarifDef = {
 export type GarageEntry = {
   id: string
   label: string
+  /** Formulierung „für die Garage in …“ im Druckvertrag */
+  vertragsAdresse: string
   tarife: readonly TarifDef[]
 }
 
@@ -19,6 +21,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1010-posthoefe',
     label: '1010 Wien — Garage Posthöfe',
+    vertragsAdresse: '1010 WIEN, Garage Posthöfe',
     tarife: [
       {
         id: '1010-posthoefe__mw-fr-350',
@@ -50,6 +53,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1030-intercont',
     label: '1030 Wien — Garage Hotel InterContinental',
+    vertragsAdresse: '1030 WIEN, Hotel InterContinental (Garage)',
     tarife: [
       {
         id: '1030-intercont__mo-so-24h-fix',
@@ -76,6 +80,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1060-mollardgasse',
     label: '1060 Wien — Garage Mollardgasse',
+    vertragsAdresse: '1060 WIEN, Mollardgasse',
     tarife: [
       {
         id: '1060-mollardgasse__mw-fr-350',
@@ -107,6 +112,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1070-zieglergasse',
     label: '1070 Wien — Zieglergasse',
+    vertragsAdresse: '1070 WIEN, Zieglergasse',
     tarife: [
       {
         id: '1070-zieglergasse__mo-so-24h-fix',
@@ -133,6 +139,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1070-neubaugasse',
     label: '1070 Wien — Garage Neubaugasse',
+    vertragsAdresse: '1070 WIEN, Neubaugasse',
     tarife: [
       {
         id: '1070-neubaugasse__nacht-var',
@@ -149,6 +156,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1190-skyline',
     label: '1190 Wien — P&R Garage Skyline',
+    vertragsAdresse: '1190 WIEN, P&R Garage Skyline',
     tarife: [
       {
         id: '1190-skyline__mo-so-24h-fix-range',
@@ -185,6 +193,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1210-am-spitz',
     label: '1210 Wien — Garage Am Spitz',
+    vertragsAdresse: '1210 WIEN, Am Spitz',
     tarife: [
       {
         id: '1210-am-spitz__mo-so-24h-var',
@@ -211,6 +220,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '1220-reichsbruecke',
     label: '1220 Wien — Garage Reichsbrücke',
+    vertragsAdresse: '1220 WIEN, Rudolf Nurejew Promenade 9',
     tarife: [
       {
         id: '1220-reichsbruecke__mo-so-var',
@@ -233,6 +243,7 @@ export const GARAGEN: readonly GarageEntry[] = [
   {
     id: '8020-graz-leiner',
     label: '8020 Graz — Garage Leiner',
+    vertragsAdresse: '8020 GRAZ, Garage Leiner',
     tarife: [
       {
         id: '8020-graz-leiner__mw-fr-350',
