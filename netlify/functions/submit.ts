@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import nodemailer from 'nodemailer'
 import { applicationPayloadSchema, type ApplicationPayload } from '../../src/lib/schema'
 import { GARAGEN, formatTarifLine } from '../../src/lib/constants'
+import { antragDocxFilename, buildAntragDocx } from './buildAntragDocx'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,7 +23,10 @@ function garageLabel(id: string): string {
   return GARAGEN.find((g) => g.id === id)?.label ?? id
 }
 
-function buildEmailHtml(payload: ApplicationPayload): string {
+function buildEmailHtml(
+  payload: ApplicationPayload,
+  options?: { hasWordAttachment: boolean },
+): string {
   const rows: [string, string][] = [
     ['Name / Firma', payload.name_firma],
     ['Adresse', payload.adresse],
@@ -43,11 +47,21 @@ function buildEmailHtml(payload: ApplicationPayload): string {
         `<tr><td style="padding:6px 12px;border:1px solid #ddd"><strong>${k}</strong></td><td style="padding:6px 12px;border:1px solid #ddd">${String(v)}</td></tr>`,
     )
     .join('')
-  return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table></body></html>`
+  const anhang =
+    options?.hasWordAttachment === true
+      ? '<p style="margin-top:14px;font-size:14px">Anhang: dieselben Daten als <strong>Microsoft Word (.docx)</strong> zur Bearbeitung in der Buchhaltung.</p>'
+      : ''
+  return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table>${anhang}</body></html>`
 }
 
 /** Google Workspace / Gmail SMTP (App-Passwort ohne Leerzeichen). */
-async function sendSmtpEmail(html: string, subject: string) {
+type MailAttachment = { filename: string; content: Buffer }
+
+async function sendSmtpEmail(
+  html: string,
+  subject: string,
+  attachment?: MailAttachment,
+) {
   const host = process.env.MAIL_HOST ?? 'smtp.gmail.com'
   const port = Number(process.env.MAIL_PORT ?? '465')
   const secure =
@@ -73,25 +87,48 @@ async function sendSmtpEmail(html: string, subject: string) {
     to,
     subject,
     html,
+    attachments: attachment
+      ? [
+          {
+            filename: attachment.filename,
+            content: attachment.content,
+            contentType:
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          },
+        ]
+      : [],
   })
 }
 
-async function sendResendEmail(html: string, subject: string) {
+async function sendResendEmail(
+  html: string,
+  subject: string,
+  attachment?: MailAttachment,
+) {
   const key = process.env.RESEND_API_KEY!
   const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
   const from = process.env.NOTIFY_FROM!
+  const body: Record<string, unknown> = {
+    from,
+    to: [to],
+    subject,
+    html,
+  }
+  if (attachment) {
+    body.attachments = [
+      {
+        filename: attachment.filename,
+        content: attachment.content.toString('base64'),
+      },
+    ]
+  }
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from,
-      to: [to],
-      subject,
-      html,
-    }),
+    body: JSON.stringify(body),
   })
   if (!r.ok) {
     const t = await r.text()
@@ -183,13 +220,28 @@ export const handler: Handler = async (event) => {
     }
   }
 
+  let wordAttachment: MailAttachment | undefined
+  if (hasSmtp || hasResend) {
+    try {
+      const buf = await buildAntragDocx(data)
+      wordAttachment = {
+        filename: antragDocxFilename(data),
+        content: buf,
+      }
+    } catch (e) {
+      console.error('Word-Anhang konnte nicht erzeugt werden', e)
+    }
+  }
+
   try {
-    const html = buildEmailHtml(data)
+    const html = buildEmailHtml(data, {
+      hasWordAttachment: Boolean(wordAttachment),
+    })
     const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
     if (hasSmtp) {
-      await sendSmtpEmail(html, subj)
+      await sendSmtpEmail(html, subj, wordAttachment)
     } else if (hasResend) {
-      await sendResendEmail(html, subj)
+      await sendResendEmail(html, subj, wordAttachment)
     } else {
       console.warn('Kein E-Mail-Versand konfiguriert — nur Datenbank')
     }
