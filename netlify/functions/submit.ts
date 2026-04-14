@@ -3,7 +3,6 @@ import { createClient } from '@supabase/supabase-js'
 import nodemailer from 'nodemailer'
 import { applicationPayloadSchema, type ApplicationPayload } from '../../src/lib/schema'
 import { GARAGEN, formatTarifLine } from '../../src/lib/constants'
-import { antragDocxFilename, buildAntragDocx } from './buildAntragDocx'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -238,27 +237,61 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
   }
 
   let wordAttachment: MailAttachment | undefined
-  if (hasSmtp || hasResend) {
+  if (
+    (hasSmtp || hasResend) &&
+    process.env.SKIP_WORD_ATTACHMENT !== 'true'
+  ) {
     try {
-      const buf = await buildAntragDocx(data)
+      // Dynamischer Import: verhindert Absturz beim Cold Start, falls docx nicht lädt
+      const mod = await import('./buildAntragDocx')
+      const buf = await mod.buildAntragDocx(data)
       wordAttachment = {
-        filename: antragDocxFilename(data),
+        filename: mod.antragDocxFilename(data),
         content: buf,
       }
     } catch (e) {
       console.error('Word-Anhang konnte nicht erzeugt werden', e)
     }
+  } else if (process.env.SKIP_WORD_ATTACHMENT === 'true') {
+    console.warn('SKIP_WORD_ATTACHMENT: kein .docx-Anhang')
   }
 
+  const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
+
   try {
-    const html = buildEmailHtml(data, {
+    let html = buildEmailHtml(data, {
       hasWordAttachment: Boolean(wordAttachment),
     })
-    const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
     if (hasSmtp) {
-      await sendSmtpEmail(html, subj, wordAttachment)
+      try {
+        await sendSmtpEmail(html, subj, wordAttachment)
+      } catch (e) {
+        if (wordAttachment) {
+          console.warn(
+            'SMTP mit Anhang fehlgeschlagen, ohne Anhang wiederholen',
+            e,
+          )
+          html = buildEmailHtml(data, { hasWordAttachment: false })
+          await sendSmtpEmail(html, subj, undefined)
+        } else {
+          throw e
+        }
+      }
     } else if (hasResend) {
-      await sendResendEmail(html, subj, wordAttachment)
+      try {
+        await sendResendEmail(html, subj, wordAttachment)
+      } catch (e) {
+        if (wordAttachment) {
+          console.warn(
+            'Resend mit Anhang fehlgeschlagen, ohne Anhang wiederholen',
+            e,
+          )
+          html = buildEmailHtml(data, { hasWordAttachment: false })
+          await sendResendEmail(html, subj, undefined)
+        } else {
+          throw e
+        }
+      }
     } else {
       console.warn('Kein E-Mail-Versand konfiguriert — nur Datenbank')
     }
