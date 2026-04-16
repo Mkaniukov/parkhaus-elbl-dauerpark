@@ -1,0 +1,5 @@
+# https://supabase.com/docs/guides/cli/config
+
+[functions.generate-contract]
+# Database Webhooks senden kein User-JWT; direkter Aufruf mit Service Role im Body möglich
+verify_jwt = false
