@@ -95,6 +95,19 @@ function extractRecordId(payload: unknown): string | null {
   return null
 }
 
+/** GOOGLE_DOC_ID darf nur die ID sein; aus voller URL oder `…/edit?tab=…` extrahieren. */
+function normalizeGoogleDocId(raw: string): string {
+  const t = raw.trim()
+  if (!t) return ""
+  const fromDocs = /\/document\/d\/([a-zA-Z0-9_-]+)/.exec(t)
+  if (fromDocs) return fromDocs[1]!
+  const fromShort = /\/d\/([a-zA-Z0-9_-]+)/.exec(t)
+  if (fromShort) return fromShort[1]!
+  let id = t.split("/")[0] ?? t
+  id = (id.split("?")[0] ?? id).trim()
+  return id
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -104,9 +117,9 @@ serve(async (req: Request) => {
     return jsonResponse({ ok: false, error: "Method Not Allowed" }, 405)
   }
 
-  const templateId = Deno.env.get("GOOGLE_DOC_ID")
+  const templateId = normalizeGoogleDocId(Deno.env.get("GOOGLE_DOC_ID") ?? "")
   if (!templateId) {
-    return jsonResponse({ ok: false, error: "GOOGLE_DOC_ID fehlt" }, 500)
+    return jsonResponse({ ok: false, error: "GOOGLE_DOC_ID fehlt oder ungültig" }, 500)
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")

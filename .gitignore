@@ -11,6 +11,7 @@ node_modules
 .npm-cache
 .config
 .netlify
+supabase/.temp
 .env
 .env.*
 !.env.example
