@@ -8,13 +8,13 @@
  *
  * Secrets (Supabase Dashboard → Edge Functions → Secrets):
  * - GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_PROJECT_ID, GOOGLE_DOC_ID
+ * - optional: GOOGLE_DRIVE_PARENT_FOLDER_ID — Zielordner (z. B. Shared Drive), sonst Speicher des Service-Accounts (oft schnell voll)
  * - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (meist automatisch gesetzt)
  *
  * Service Account braucht Zugriff auf die Vorlage (Freigabe „Bearbeiten“).
  */
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1"
-import { google } from "npm:googleapis@144.0.0"
 import { JWT } from "npm:google-auth-library@9.14.2"
 
 const corsHeaders: Record<string, string> = {
@@ -27,7 +27,12 @@ type Row = {
   id: string
   name_firma: string
   adresse: string
+  telefon: string
+  email: string
+  fahrzeug: string
+  kennzeichen: string
   tarif: string
+  garage: string
   beginn: string
 }
 
@@ -82,6 +87,66 @@ function getGoogleJwt() {
   })
 }
 
+async function googleAccessToken(jwt: JWT): Promise<string> {
+  const res = await jwt.getAccessToken()
+  const token = typeof res === "string" ? res : res?.token
+  if (!token) throw new Error("Google Access Token fehlt")
+  return token
+}
+
+/** Kleines Bundle: ohne `googleapis`, nur REST — vermeidet Deploy-500 durch riesigen Worker. */
+async function driveCopyFile(
+  accessToken: string,
+  templateId: string,
+  name: string,
+  parentFolderId: string | undefined,
+): Promise<{ id: string }> {
+  const q = new URLSearchParams({
+    supportsAllDrives: "true",
+    fields: "id,webViewLink",
+  })
+  const body: Record<string, unknown> = { name }
+  if (parentFolderId) body.parents = [parentFolderId]
+  const r = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(templateId)}/copy?${q}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  )
+  const text = await r.text()
+  if (!r.ok) {
+    throw new Error(`Drive copy ${r.status}: ${text.slice(0, 500)}`)
+  }
+  return JSON.parse(text) as { id: string }
+}
+
+async function docsBatchUpdate(
+  accessToken: string,
+  documentId: string,
+  requests: Record<string, unknown>[],
+): Promise<void> {
+  const r = await fetch(
+    `https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}:batchUpdate`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ requests }),
+    },
+  )
+  const text = await r.text()
+  if (!r.ok) {
+    throw new Error(`Docs batchUpdate ${r.status}: ${text.slice(0, 500)}`)
+  }
+}
+
 function extractRecordId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null
   const o = payload as Record<string, unknown>
@@ -106,6 +171,15 @@ function normalizeGoogleDocId(raw: string): string {
   let id = t.split("/")[0] ?? t
   id = (id.split("?")[0] ?? id).trim()
   return id
+}
+
+/** Ordner-ID aus URL oder nur ID (für Kopie ins Team-Laufwerk / freigegebenen Ordner). */
+function normalizeFolderId(raw: string | undefined): string | undefined {
+  if (!raw?.trim()) return undefined
+  const t = raw.trim()
+  const fromUrl = /\/folders\/([a-zA-Z0-9_-]+)/.exec(t)
+  if (fromUrl) return fromUrl[1]!
+  return t.split("/")[0]!.split("?")[0]!
 }
 
 serve(async (req: Request) => {
@@ -155,7 +229,7 @@ serve(async (req: Request) => {
   const { data: row, error: fetchErr } = await supabase
     .from("dauerpark_antraege")
     .select(
-      "id, name_firma, adresse, tarif, beginn",
+      "id, name_firma, adresse, telefon, email, fahrzeug, kennzeichen, tarif, garage, beginn",
     )
     .eq("id", recordId)
     .maybeSingle()
@@ -170,40 +244,65 @@ serve(async (req: Request) => {
 
   const r = row as Row
   const { name, surname } = splitNameFirma(r.name_firma)
-  const address = r.adresse
   const price = formatPriceDisplay(r.tarif)
   const date = formatDateDE(r.beginn)
+  /** Platzhalter im Google-Doc → Wert (Templates variieren: {{name_firma}} vs {{name}}). */
+  const placeholderPairs: [string, string][] = [
+    ["{{name_firma}}", r.name_firma],
+    ["{{adresse}}", r.adresse],
+    ["{{telefon}}", r.telefon],
+    ["{{email}}", r.email],
+    ["{{fahrzeug}}", r.fahrzeug],
+    ["{{Fahrzeug}}", r.fahrzeug],
+    ["{{kennzeichen}}", r.kennzeichen],
+    ["{{Kennzeichen}}", r.kennzeichen],
+    ["{{garage}}", r.garage],
+    ["{{Garage}}", r.garage],
+    ["{{tarif}}", r.tarif],
+    ["{{Tarif}}", r.tarif],
+    ["{{beginn}}", date],
+    ["{{Beginn}}", date],
+    ["{{Kunden-Nr.}}", "—"],
+    ["{{Kunden-Nr}}", "—"],
+    ["{{Top}}", "—"],
+    ["{{name}}", name],
+    ["{{surname}}", surname],
+    ["{{address}}", r.adresse],
+    ["{{Address}}", r.adresse],
+    ["{{price}}", price],
+    ["{{Price}}", price],
+    ["{{date}}", date],
+    ["{{Date}}", date],
+  ]
 
   try {
-    const auth = getGoogleJwt()
-    const drive = google.drive({ version: "v3", auth })
-    const docs = google.docs({ version: "v1", auth })
+    const jwt = getGoogleJwt()
+    const accessToken = await googleAccessToken(jwt)
 
     const copyName = `Dauerparkvertrag ${r.name_firma}`.slice(0, 200)
-    const { data: copied } = await drive.files.copy({
-      fileId: templateId,
-      requestBody: { name: copyName },
-      fields: "id, webViewLink",
-      supportsAllDrives: true,
-    })
+    const parentFolderId = normalizeFolderId(
+      Deno.env.get("GOOGLE_DRIVE_PARENT_FOLDER_ID"),
+    )
+    const copied = await driveCopyFile(
+      accessToken,
+      templateId,
+      copyName,
+      parentFolderId,
+    )
 
     const newId = copied?.id
     if (!newId) {
       throw new Error("Drive copy: keine neue Datei-ID")
     }
 
-    const requests = [
-      { replaceAllText: { containsText: { text: "{{name}}", matchCase: false }, replaceText: name } },
-      { replaceAllText: { containsText: { text: "{{surname}}", matchCase: false }, replaceText: surname } },
-      { replaceAllText: { containsText: { text: "{{address}}", matchCase: false }, replaceText: address } },
-      { replaceAllText: { containsText: { text: "{{price}}", matchCase: false }, replaceText: price } },
-      { replaceAllText: { containsText: { text: "{{date}}", matchCase: false }, replaceText: date } },
-    ]
+    const requests = placeholderPairs.map(([text, replaceText]) => ({
+      replaceAllText: {
+        containsText: { text, matchCase: false },
+        replaceText,
+      },
+    }))
 
-    await docs.documents.batchUpdate({
-      documentId: newId,
-      requestBody: { requests },
-    })
+    await docsBatchUpdate(accessToken, newId, requests)
 
     const docUrl = `https://docs.google.com/document/d/${newId}/edit`
 

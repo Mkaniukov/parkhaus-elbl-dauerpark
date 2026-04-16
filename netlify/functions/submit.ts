@@ -208,23 +208,27 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
 
   if (hasDb) {
     const supabase = createClient(supabaseUrl!, serviceKey!)
-    const { error } = await supabase.from('dauerpark_antraege').insert({
-      name_firma: data.name_firma,
-      adresse: data.adresse,
-      telefon: data.telefon,
-      email: data.email,
-      beginn: data.beginn,
-      fahrzeug: data.fahrzeug,
-      kennzeichen: data.kennzeichen,
-      iban: data.iban,
-      bic: data.bic ?? null,
-      lautend_auf: data.lautend_auf,
-      tarif: data.tarif,
-      garage: data.garage,
-      agb_akzeptiert: data.agb_akzeptiert,
-      sepa_akzeptiert: data.sepa_akzeptiert,
-      datenschutz_akzeptiert: data.datenschutz_akzeptiert,
-    })
+    const { data: inserted, error } = await supabase
+      .from('dauerpark_antraege')
+      .insert({
+        name_firma: data.name_firma,
+        adresse: data.adresse,
+        telefon: data.telefon,
+        email: data.email,
+        beginn: data.beginn,
+        fahrzeug: data.fahrzeug,
+        kennzeichen: data.kennzeichen,
+        iban: data.iban,
+        bic: data.bic ?? null,
+        lautend_auf: data.lautend_auf,
+        tarif: data.tarif,
+        garage: data.garage,
+        agb_akzeptiert: data.agb_akzeptiert,
+        sepa_akzeptiert: data.sepa_akzeptiert,
+        datenschutz_akzeptiert: data.datenschutz_akzeptiert,
+      })
+      .select('id')
+      .single()
     if (error) {
       console.error('Supabase insert', {
         message: error.message,
@@ -233,6 +237,9 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
         hint: error.hint,
       })
       return json(500, { ok: false, error: 'Speichern fehlgeschlagen.' })
+    }
+    if (inserted?.id && process.env.SKIP_GENERATE_CONTRACT !== 'true') {
+      void triggerGenerateContract(supabaseUrl!, serviceKey!, inserted.id)
     }
   }
 
@@ -301,4 +308,25 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
   }
 
   return json(200, { ok: true })
+}
+
+/** Edge Function `generate-contract` — Google-Doc aus Vorlage; optional per SKIP_GENERATE_CONTRACT aus. */
+async function triggerGenerateContract(
+  supabaseUrl: string,
+  serviceKey: string,
+  recordId: string,
+): Promise<void> {
+  const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/generate-contract`
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${serviceKey}`,
+    },
+    body: JSON.stringify({ record_id: recordId }),
+  })
+  if (!r.ok) {
+    const t = await r.text()
+    console.error('generate-contract', r.status, t)
+  }
 }
