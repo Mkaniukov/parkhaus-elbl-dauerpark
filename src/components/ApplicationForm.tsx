@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
@@ -41,7 +41,8 @@ function submitEndpoint(): string {
 }
 
 export function ApplicationForm() {
-  const [honeypot, setHoneypot] = useState('')
+  /** Honeypot: Wert nur beim Submit lesen (vermeidet Autofill/State-Fehler). */
+  const companyWebsiteTrapRef = useRef<HTMLInputElement>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>(
     'idle',
   )
@@ -81,7 +82,10 @@ export function ApplicationForm() {
       const res = await fetch(submitEndpoint(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, _hp: honeypot }),
+        body: JSON.stringify({
+          ...data,
+          company_website: companyWebsiteTrapRef.current?.value ?? '',
+        }),
       })
       const json = (await res.json().catch(() => ({}))) as {
         ok?: boolean
@@ -94,7 +98,7 @@ export function ApplicationForm() {
       }
       setStatus('ok')
       setMessage('Vielen Dank! Ihre Angaben wurden übermittelt.')
-      setHoneypot('')
+      if (companyWebsiteTrapRef.current) companyWebsiteTrapRef.current.value = ''
       reset(defaultValues)
     } catch {
       setStatus('err')
@@ -259,14 +263,14 @@ export function ApplicationForm() {
       </div>
 
       <input
+        ref={companyWebsiteTrapRef}
         type="text"
-        name="_hp"
+        name="company_website"
         tabIndex={-1}
         autoComplete="off"
         className="hp"
         aria-hidden
-        value={honeypot}
-        onChange={(e) => setHoneypot(e.target.value)}
+        defaultValue=""
       />
 
       <div className="form-actions">

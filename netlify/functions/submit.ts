@@ -195,10 +195,18 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     return json(400, { ok: false, error: 'Ungültige JSON-Daten' })
   }
 
-  if (raw._hp && String(raw._hp).trim() !== '') {
+  /** Honeypot: Bots füllen oft aus; echte Nutzer lassen leer. */
+  const hpRaw = raw.company_website
+  delete raw.company_website
+  if (
+    typeof hpRaw === 'string' &&
+    hpRaw.trim() !== ''
+  ) {
+    console.warn('submit: honeypot company_website nicht leer — Abbruch (stilles OK)', {
+      len: hpRaw.length,
+    })
     return json(200, { ok: true })
   }
-  delete raw._hp
 
   const parsed = applicationPayloadSchema.safeParse(raw)
   if (!parsed.success) {
@@ -231,6 +239,13 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
         'Server-Konfiguration: In Netlify unter Environment variables mindestens MAIL_USER und MAIL_PASSWORD setzen (oder Supabase URL + Service Role), Scope „Production“ wählen und Site neu deployen.',
     })
   }
+
+  console.info('submit: verarbeite Antrag', {
+    hasDb,
+    hasSmtp,
+    hasResend,
+    skipContract: process.env.SKIP_GENERATE_CONTRACT === 'true',
+  })
 
   if (hasSmtp && !hasDb) {
     console.warn(
