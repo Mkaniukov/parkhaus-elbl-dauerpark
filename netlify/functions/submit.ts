@@ -95,10 +95,26 @@ function contractPdfFilename(kennzeichen: string): string {
   return `Dauerparkvertrag-${safe || 'Antrag'}.pdf`
 }
 
+type MailSendOptions = {
+  /** Kopie an Antragsteller:in (BCC), wenn ≠ NOTIFY_TO */
+  applicantEmail?: string
+}
+
+function bccForApplicant(
+  applicantEmail: string | undefined,
+  notifyTo: string,
+): string | undefined {
+  const trimmed = applicantEmail?.trim()
+  if (!trimmed) return undefined
+  if (trimmed.toLowerCase() === notifyTo.trim().toLowerCase()) return undefined
+  return trimmed
+}
+
 async function sendSmtpEmail(
   html: string,
   subject: string,
   attachments: MailAttachment[],
+  options?: MailSendOptions,
 ) {
   const host = process.env.MAIL_HOST ?? 'smtp.gmail.com'
   const port = Number(process.env.MAIL_PORT ?? '465')
@@ -113,6 +129,7 @@ async function sendSmtpEmail(
   const from =
     process.env.MAIL_FROM ?? `Parkhaus ELBL <${user}>`
   const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
+  const bcc = bccForApplicant(options?.applicantEmail, to)
 
   const transporter = nodemailer.createTransport({
     host,
@@ -123,6 +140,7 @@ async function sendSmtpEmail(
   await transporter.sendMail({
     from,
     to,
+    ...(bcc ? { bcc } : {}),
     subject,
     html,
     attachments: attachments.map((a) => ({
@@ -137,13 +155,16 @@ async function sendResendEmail(
   html: string,
   subject: string,
   attachments: MailAttachment[],
+  options?: MailSendOptions,
 ) {
   const key = process.env.RESEND_API_KEY!
   const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
   const from = process.env.NOTIFY_FROM!
+  const bcc = bccForApplicant(options?.applicantEmail, to)
   const body: Record<string, unknown> = {
     from,
     to: [to],
+    ...(bcc ? { bcc: [bcc] } : {}),
     subject,
     html,
   }
@@ -334,7 +355,9 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     })
     if (hasSmtp) {
       try {
-        await sendSmtpEmail(html, subj, mailAttachments)
+        await sendSmtpEmail(html, subj, mailAttachments, {
+          applicantEmail: data.email,
+        })
       } catch (e) {
         if (mailAttachments.length > 0) {
           console.warn(
@@ -346,14 +369,18 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
             contractDocUrl: contractFromGoogle?.url,
             hasContractPdfAttachment: false,
           })
-          await sendSmtpEmail(html, subj, [])
+          await sendSmtpEmail(html, subj, [], {
+            applicantEmail: data.email,
+          })
         } else {
           throw e
         }
       }
     } else if (hasResend) {
       try {
-        await sendResendEmail(html, subj, mailAttachments)
+        await sendResendEmail(html, subj, mailAttachments, {
+          applicantEmail: data.email,
+        })
       } catch (e) {
         if (mailAttachments.length > 0) {
           console.warn(
@@ -365,20 +392,26 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
             contractDocUrl: contractFromGoogle?.url,
             hasContractPdfAttachment: false,
           })
-          await sendResendEmail(html, subj, [])
+          await sendResendEmail(html, subj, [], {
+            applicantEmail: data.email,
+          })
         } else {
           throw e
         }
       }
     } else {
-      console.warn('Kein E-Mail-Versand konfiguriert — nur Datenbank')
+      console.error(
+        'submit: KEIN E-Mail-Versand — in Netlify Production fehlen MAIL_USER/MAIL_PASSWORD oder (RESEND_API_KEY + NOTIFY_FROM). Daten wurden ggf. gespeichert.',
+        { hasDb },
+      )
     }
   } catch (e) {
     console.error(e)
     return json(500, { ok: false, error: 'E-Mail konnte nicht gesendet werden.' })
   }
 
-  return json(200, { ok: true })
+  const mailSkipped = !hasSmtp && !hasResend
+  return json(200, { ok: true, mailSkipped })
 }
 
 /** Edge Function generate-contract: Doc + URL in DB; mit return_pdf auch PDF-Bytes für Mail. */

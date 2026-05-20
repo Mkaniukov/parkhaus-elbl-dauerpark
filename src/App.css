@@ -228,3 +228,9 @@
   color: var(--err-text);
   border: 1px solid var(--err-border);
 }
+
+.banner.warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 1px solid var(--warn-border);
+}

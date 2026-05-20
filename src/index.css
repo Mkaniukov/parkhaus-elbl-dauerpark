@@ -15,6 +15,9 @@
   --ok-bg: #ecfdf3;
   --ok-text: #027a48;
   --ok-border: #a6f4c5;
+  --warn-bg: #fffbeb;
+  --warn-text: #b45309;
+  --warn-border: #fcd34d;
   --err-bg: #fef3f2;
   --err-text: #b42318;
   --err-border: #fecdca;
@@ -41,6 +44,9 @@
     --ok-bg: #0a1f14;
     --ok-text: #34d399;
     --ok-border: #065f46;
+    --warn-bg: #1c1917;
+    --warn-text: #fbbf24;
+    --warn-border: #78350f;
     --err-bg: #2a1210;
     --err-text: #fca5a5;
     --err-border: #7f1d1d;

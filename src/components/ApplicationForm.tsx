@@ -47,6 +47,8 @@ export function ApplicationForm() {
     'idle',
   )
   const [message, setMessage] = useState('')
+  /** Server hat gespeichert, aber kein SMTP/Resend (Netlify env). */
+  const [mailSkipped, setMailSkipped] = useState(false)
 
   const {
     register,
@@ -78,6 +80,7 @@ export function ApplicationForm() {
   const onSubmit = handleSubmit(async (data) => {
     setStatus('loading')
     setMessage('')
+    setMailSkipped(false)
     try {
       const res = await fetch(submitEndpoint(), {
         method: 'POST',
@@ -90,14 +93,20 @@ export function ApplicationForm() {
       const json = (await res.json().catch(() => ({}))) as {
         ok?: boolean
         error?: string
+        mailSkipped?: boolean
       }
       if (!res.ok || !json.ok) {
         setStatus('err')
         setMessage(json.error || 'Senden fehlgeschlagen.')
         return
       }
+      setMailSkipped(Boolean(json.mailSkipped))
       setStatus('ok')
-      setMessage('Vielen Dank! Ihre Angaben wurden übermittelt.')
+      setMessage(
+        json.mailSkipped
+          ? 'Ihre Daten wurden gespeichert. Es konnte keine E-Mail versendet werden (Server-Konfiguration: in Netlify unter „Environment variables“ → Production SMTP oder Resend eintragen, dann neu deployen).'
+          : 'Vielen Dank! Ihre Angaben wurden übermittelt.',
+      )
       if (companyWebsiteTrapRef.current) companyWebsiteTrapRef.current.value = ''
       reset(defaultValues)
     } catch {
@@ -283,7 +292,9 @@ export function ApplicationForm() {
         </button>
       </div>
 
-      {status === 'ok' && <p className="banner ok">{message}</p>}
+      {status === 'ok' && (
+        <p className={`banner ${mailSkipped ? 'warn' : 'ok'}`}>{message}</p>
+      )}
       {status === 'err' && <p className="banner err">{message}</p>}
     </form>
   )
