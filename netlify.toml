@@ -14,5 +14,4 @@
   node_bundler = "esbuild"
   # docx bricht bei reiner esbuild-Bündelung oft; als Node-Modul mitliefern
   external_node_modules = ["docx"]
-  # submit wartet auf Google Doc + PDF (Standard ist oft 10s — bei Timeout im Dashboard erhöhen, z. B. 26s)
-  timeout = 26
+  # Function-Timeout (submit + Google/PDF): Netlify Dashboard → Site configuration → Functions → Function timeout (max. 26s je nach Plan)
