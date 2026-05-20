@@ -22,9 +22,21 @@ function garageLabel(id: string): string {
   return GARAGEN.find((g) => g.id === id)?.label ?? id
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 function buildEmailHtml(
   payload: ApplicationPayload,
-  options?: { hasWordAttachment: boolean },
+  options?: {
+    hasWordAttachment?: boolean
+    contractDocUrl?: string
+    hasContractPdfAttachment?: boolean
+  },
 ): string {
   const rows: [string, string][] = [
     ['Name / Firma', payload.name_firma],
@@ -46,20 +58,47 @@ function buildEmailHtml(
         `<tr><td style="padding:6px 12px;border:1px solid #ddd"><strong>${k}</strong></td><td style="padding:6px 12px;border:1px solid #ddd">${String(v)}</td></tr>`,
     )
     .join('')
-  const anhang =
-    options?.hasWordAttachment === true
-      ? '<p style="margin-top:14px;font-size:14px">Anhang: dieselben Daten als <strong>Microsoft Word (.docx)</strong> zur Bearbeitung in der Buchhaltung.</p>'
+  const vertragLink =
+    options?.contractDocUrl && options.contractDocUrl.trim() !== ''
+      ? `<p style="margin-top:14px"><strong>Dauerpark-Vertrag (Google Doc):</strong> <a href="${escapeHtml(options.contractDocUrl)}">Dokument öffnen</a></p>`
       : ''
-  return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table>${anhang}</body></html>`
+  const pdfHinweis = options?.hasContractPdfAttachment
+    ? '<p style="margin-top:8px;font-size:14px">Anhang: <strong>PDF-Export</strong> des Vertrags (Vorlage).</p>'
+    : ''
+  const anhangWord =
+    options?.hasWordAttachment === true
+      ? '<p style="margin-top:14px;font-size:14px">Anhang: dieselben Antragsdaten als <strong>Microsoft Word (.docx)</strong> zur Bearbeitung.</p>'
+      : ''
+  return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table>${vertragLink}${pdfHinweis}${anhangWord}</body></html>`
 }
 
 /** Google Workspace / Gmail SMTP (App-Passwort ohne Leerzeichen). */
 type MailAttachment = { filename: string; content: Buffer }
 
+/** Rückgabe von Edge Function generate-contract (Mail: Link + PDF). */
+type ContractFromGoogle = { url: string; pdfBuffer?: Buffer }
+
+function contentTypeForFilename(filename: string): string {
+  if (filename.endsWith('.pdf')) return 'application/pdf'
+  if (filename.endsWith('.docx')) {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  }
+  return 'application/octet-stream'
+}
+
+/** Google „Vertrag“ für Dateiname (PDF). */
+function contractPdfFilename(kennzeichen: string): string {
+  const safe = kennzeichen
+    .replace(/[^\w\-]+/gu, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 40)
+  return `Dauerparkvertrag-${safe || 'Antrag'}.pdf`
+}
+
 async function sendSmtpEmail(
   html: string,
   subject: string,
-  attachment?: MailAttachment,
+  attachments: MailAttachment[],
 ) {
   const host = process.env.MAIL_HOST ?? 'smtp.gmail.com'
   const port = Number(process.env.MAIL_PORT ?? '465')
@@ -86,23 +125,18 @@ async function sendSmtpEmail(
     to,
     subject,
     html,
-    attachments: attachment
-      ? [
-          {
-            filename: attachment.filename,
-            content: attachment.content,
-            contentType:
-              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          },
-        ]
-      : [],
+    attachments: attachments.map((a) => ({
+      filename: a.filename,
+      content: a.content,
+      contentType: contentTypeForFilename(a.filename),
+    })),
   })
 }
 
 async function sendResendEmail(
   html: string,
   subject: string,
-  attachment?: MailAttachment,
+  attachments: MailAttachment[],
 ) {
   const key = process.env.RESEND_API_KEY!
   const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
@@ -113,13 +147,11 @@ async function sendResendEmail(
     subject,
     html,
   }
-  if (attachment) {
-    body.attachments = [
-      {
-        filename: attachment.filename,
-        content: attachment.content.toString('base64'),
-      },
-    ]
+  if (attachments.length > 0) {
+    body.attachments = attachments.map((a) => ({
+      filename: a.filename,
+      content: a.content.toString('base64'),
+    }))
   }
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -206,6 +238,7 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     )
   }
 
+  let contractFromGoogle: ContractFromGoogle | undefined
   if (hasDb) {
     const supabase = createClient(supabaseUrl!, serviceKey!)
     const { data: inserted, error } = await supabase
@@ -239,7 +272,11 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
       return json(500, { ok: false, error: 'Speichern fehlgeschlagen.' })
     }
     if (inserted?.id && process.env.SKIP_GENERATE_CONTRACT !== 'true') {
-      void triggerGenerateContract(supabaseUrl!, serviceKey!, inserted.id)
+      contractFromGoogle = await fetchGenerateContract(
+        supabaseUrl!,
+        serviceKey!,
+        inserted.id,
+      )
     }
   }
 
@@ -263,38 +300,57 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     console.warn('SKIP_WORD_ATTACHMENT: kein .docx-Anhang')
   }
 
+  const mailAttachments: MailAttachment[] = []
+  if (wordAttachment) mailAttachments.push(wordAttachment)
+  if (contractFromGoogle?.pdfBuffer) {
+    mailAttachments.push({
+      filename: contractPdfFilename(data.kennzeichen),
+      content: contractFromGoogle.pdfBuffer,
+    })
+  }
+
   const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
 
   try {
     let html = buildEmailHtml(data, {
       hasWordAttachment: Boolean(wordAttachment),
+      contractDocUrl: contractFromGoogle?.url,
+      hasContractPdfAttachment: Boolean(contractFromGoogle?.pdfBuffer),
     })
     if (hasSmtp) {
       try {
-        await sendSmtpEmail(html, subj, wordAttachment)
+        await sendSmtpEmail(html, subj, mailAttachments)
       } catch (e) {
-        if (wordAttachment) {
+        if (mailAttachments.length > 0) {
           console.warn(
             'SMTP mit Anhang fehlgeschlagen, ohne Anhang wiederholen',
             e,
           )
-          html = buildEmailHtml(data, { hasWordAttachment: false })
-          await sendSmtpEmail(html, subj, undefined)
+          html = buildEmailHtml(data, {
+            hasWordAttachment: false,
+            contractDocUrl: contractFromGoogle?.url,
+            hasContractPdfAttachment: false,
+          })
+          await sendSmtpEmail(html, subj, [])
         } else {
           throw e
         }
       }
     } else if (hasResend) {
       try {
-        await sendResendEmail(html, subj, wordAttachment)
+        await sendResendEmail(html, subj, mailAttachments)
       } catch (e) {
-        if (wordAttachment) {
+        if (mailAttachments.length > 0) {
           console.warn(
             'Resend mit Anhang fehlgeschlagen, ohne Anhang wiederholen',
             e,
           )
-          html = buildEmailHtml(data, { hasWordAttachment: false })
-          await sendResendEmail(html, subj, undefined)
+          html = buildEmailHtml(data, {
+            hasWordAttachment: false,
+            contractDocUrl: contractFromGoogle?.url,
+            hasContractPdfAttachment: false,
+          })
+          await sendResendEmail(html, subj, [])
         } else {
           throw e
         }
@@ -310,23 +366,50 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
   return json(200, { ok: true })
 }
 
-/** Edge Function `generate-contract` — Google-Doc aus Vorlage; optional per SKIP_GENERATE_CONTRACT aus. */
-async function triggerGenerateContract(
+/** Edge Function generate-contract: Doc + URL in DB; mit return_pdf auch PDF-Bytes für Mail. */
+async function fetchGenerateContract(
   supabaseUrl: string,
   serviceKey: string,
   recordId: string,
-): Promise<void> {
+): Promise<ContractFromGoogle | undefined> {
   const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/generate-contract`
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${serviceKey}`,
-    },
-    body: JSON.stringify({ record_id: recordId }),
-  })
-  if (!r.ok) {
-    const t = await r.text()
-    console.error('generate-contract', r.status, t)
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ record_id: recordId, return_pdf: true }),
+    })
+    const text = await r.text()
+    if (!r.ok) {
+      console.error('generate-contract', r.status, text)
+      return undefined
+    }
+    let parsed: {
+      ok?: boolean
+      contract_pdf_url?: string
+      contract_pdf_base64?: string
+    }
+    try {
+      parsed = JSON.parse(text) as typeof parsed
+    } catch {
+      console.error('generate-contract: kein JSON', text.slice(0, 300))
+      return undefined
+    }
+    if (!parsed.ok || !parsed.contract_pdf_url) return undefined
+    let pdfBuffer: Buffer | undefined
+    if (parsed.contract_pdf_base64) {
+      try {
+        pdfBuffer = Buffer.from(parsed.contract_pdf_base64, 'base64')
+      } catch (e) {
+        console.error('generate-contract: PDF base64', e)
+      }
+    }
+    return { url: parsed.contract_pdf_url, pdfBuffer }
+  } catch (e) {
+    console.error('generate-contract request', e)
+    return undefined
   }
 }

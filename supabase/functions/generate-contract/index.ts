@@ -4,7 +4,8 @@
  *
  * Aufruf:
  * - Database Webhook (INSERT/UPDATE auf dauerpark_antraege) mit Payload { record, type, table }
- * - Direkt: POST JSON { "record_id": "<uuid>" }
+ * - Direkt: POST JSON { "record_id": "<uuid>", "return_pdf": true }
+ *   (return_pdf optional; bei true zusätzlich contract_pdf_base64 im JSON — nur für Mail-Versand, nicht für Webhooks)
  *
  * Secrets (Supabase Dashboard → Edge Functions → Secrets):
  * - GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_PROJECT_ID, GOOGLE_DOC_ID
@@ -13,6 +14,7 @@
  *
  * Service Account braucht Zugriff auf die Vorlage (Freigabe „Bearbeiten“).
  */
+import { encodeBase64 } from "https://deno.land/std@0.177.0/encoding/base64.ts"
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1"
 import { JWT } from "npm:google-auth-library@9.14.2"
@@ -147,6 +149,26 @@ async function docsBatchUpdate(
   }
 }
 
+/** Google Doc → PDF (Drive Export API). */
+async function driveExportPdf(
+  accessToken: string,
+  fileId: string,
+): Promise<Uint8Array> {
+  const q = new URLSearchParams({
+    mimeType: "application/pdf",
+    supportsAllDrives: "true",
+  })
+  const r = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?${q}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  )
+  if (!r.ok) {
+    const t = await r.text()
+    throw new Error(`Drive export PDF ${r.status}: ${t.slice(0, 500)}`)
+  }
+  return new Uint8Array(await r.arrayBuffer())
+}
+
 function extractRecordId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null
   const o = payload as Record<string, unknown>
@@ -223,6 +245,11 @@ serve(async (req: Request) => {
       400,
     )
   }
+
+  const wantPdf =
+    typeof body === "object" &&
+    body !== null &&
+    (body as Record<string, unknown>).return_pdf === true
 
   const supabase = createClient(supabaseUrl, serviceKey)
 
@@ -319,10 +346,23 @@ serve(async (req: Request) => {
       )
     }
 
+    let contract_pdf_base64: string | undefined
+    if (wantPdf) {
+      try {
+        const pdfBytes = await driveExportPdf(accessToken, newId)
+        contract_pdf_base64 = encodeBase64(pdfBytes)
+      } catch (e) {
+        console.error("PDF export", e)
+      }
+    }
+
     return jsonResponse({
       ok: true,
       document_id: newId,
       contract_pdf_url: docUrl,
+      ...(contract_pdf_base64 !== undefined
+        ? { contract_pdf_base64 }
+        : {}),
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
