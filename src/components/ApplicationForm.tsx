@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
+import { useEffect, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
-import { useReactToPrint } from 'react-to-print'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   applicationPayloadSchema,
@@ -16,8 +14,6 @@ import {
   KUENDIGUNG_HINWEIS,
   MIN_VERTRAG_MONATE,
 } from '../lib/constants'
-import { buildContractPreview, type ContractPreview } from '../lib/contractHelpers'
-import { ContractDocument } from './ContractDocument'
 
 const defaultValues: ApplicationFormInput = {
   name_firma: '',
@@ -50,10 +46,6 @@ export function ApplicationForm() {
     'idle',
   )
   const [message, setMessage] = useState('')
-  const [contractPreview, setContractPreview] = useState<ContractPreview | null>(
-    null,
-  )
-  const printRef = useRef<HTMLDivElement>(null)
 
   const {
     register,
@@ -61,7 +53,6 @@ export function ApplicationForm() {
     control,
     setValue,
     getValues,
-    trigger,
     formState: { errors },
     reset,
   } = useForm<ApplicationFormInput>({
@@ -82,21 +73,6 @@ export function ApplicationForm() {
       setValue('tarif', first, { shouldValidate: true })
     }
   }, [garageWatch, getValues, setValue])
-
-  const handlePrint = useReactToPrint({
-    contentRef: printRef,
-    documentTitle: 'Garagenutzungsvertrag',
-    onAfterPrint: () => setContractPreview(null),
-  })
-
-  const onPrintContract = async () => {
-    const ok = await trigger()
-    if (!ok) return
-    const p = buildContractPreview(getValues())
-    if (!p) return
-    flushSync(() => setContractPreview(p))
-    handlePrint()
-  }
 
   const onSubmit = handleSubmit(async (data) => {
     setStatus('loading')
@@ -282,7 +258,6 @@ export function ApplicationForm() {
         )}
       </div>
 
-      {/* Honeypot */}
       <input
         type="text"
         name="_hp"
@@ -294,20 +269,7 @@ export function ApplicationForm() {
         onChange={(e) => setHoneypot(e.target.value)}
       />
 
-      <p className="contract-print-hint">
-        Garagenvertrag (Muster Rachholz / ELBL) mit Ihren Angaben ausfüllen und
-        als PDF speichern oder drucken — rechtsverbindlich ist die
-        unterfertigte Ausgabe der Vermieterin.
-      </p>
-
       <div className="form-actions">
-        <button
-          type="button"
-          className="btn-contract"
-          onClick={onPrintContract}
-        >
-          Garagenvertrag drucken / PDF
-        </button>
         <button
           type="submit"
           className="submit"
@@ -316,10 +278,6 @@ export function ApplicationForm() {
           {status === 'loading' ? 'Wird gesendet…' : 'Antrag senden'}
         </button>
       </div>
-
-      {contractPreview ? (
-        <ContractDocument ref={printRef} data={contractPreview} />
-      ) : null}
 
       {status === 'ok' && <p className="banner ok">{message}</p>}
       {status === 'err' && <p className="banner err">{message}</p>}
