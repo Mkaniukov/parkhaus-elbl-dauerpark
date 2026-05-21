@@ -16,6 +16,8 @@ export type GarageEntry = {
 /**
  * Tarife laut Dauer_Tarife.pdf (Preise inkl. 20 % UST), ergänzt um bisherige
  * ELBL-Optionen für Standorte ohne eigene PDF-Tabelle.
+ *
+ * Bei neuen Tarifen auch `supabase/functions/_shared/tarifLabels.ts` (gleiche IDs/Labels für Vertrags-Platzhalter) aktualisieren.
  */
 export const GARAGEN: readonly GarageEntry[] = [
   {

@@ -10,6 +10,7 @@
  * Secrets (Supabase Dashboard → Edge Functions → Secrets):
  * - GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_PROJECT_ID, GOOGLE_DOC_ID
  * - optional: GOOGLE_DRIVE_PARENT_FOLDER_ID — Zielordner (z. B. Shared Drive), sonst Speicher des Service-Accounts (oft schnell voll)
+ * - optional: CONTRACT_KAUTION_EUR — Kaution für Platzhalter {{kaution}} (Standard „400“, de-AT formatiert wie im Vertrag „400,00 €“)
  * - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (meist automatisch gesetzt)
  *
  * Service Account braucht Zugriff auf die Vorlage (Freigabe „Bearbeiten“).
@@ -18,6 +19,10 @@ import { encodeBase64 } from "https://deno.land/std@0.177.0/encoding/base64.ts"
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1"
 import { JWT } from "npm:google-auth-library@9.14.2"
+import {
+  resolveHauptmietzinsEUR,
+  resolveKautionEURDisplay,
+} from "../_shared/contractPricing.ts"
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -57,16 +62,6 @@ function formatDateDE(isoDate: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate.trim())
   if (!m) return isoDate
   return `${m[3]}.${m[2]}.${m[1]}`
-}
-
-/** Preis-Anzeige aus Tarif-Spalte (ID); ohne Label-Tabelle: kompakte Darstellung */
-function formatPriceDisplay(tarif: string): string {
-  const s = tarif.trim()
-  if (!s) return "—"
-  const after = s.includes("__") ? s.split("__").pop() ?? s : s
-  const num = after.match(/\d{2,4}/g)
-  if (num?.length) return num.map((n) => `${n},00 €`).join(" / ")
-  return s
 }
 
 function getGoogleJwt() {
@@ -271,8 +266,10 @@ serve(async (req: Request) => {
 
   const r = row as Row
   const { name, surname } = splitNameFirma(r.name_firma)
-  const price = formatPriceDisplay(r.tarif)
   const date = formatDateDE(r.beginn)
+  /** aus Tarif-Label (gemeinsame Tabelle mit Frontend), vgl. `_shared/tarifLabels.ts` */
+  const hauptmietzins = resolveHauptmietzinsEUR(r.tarif)
+  const kaution = resolveKautionEURDisplay()
   /** Platzhalter im Google-Doc → Wert (Templates variieren: {{name_firma}} vs {{name}}). */
   const placeholderPairs: [string, string][] = [
     ["{{name_firma}}", r.name_firma],
@@ -296,8 +293,15 @@ serve(async (req: Request) => {
     ["{{surname}}", surname],
     ["{{address}}", r.adresse],
     ["{{Address}}", r.adresse],
-    ["{{price}}", price],
-    ["{{Price}}", price],
+    ["{{price}}", hauptmietzins],
+    ["{{Price}}", hauptmietzins],
+    ["{{hauptmietzins}}", hauptmietzins],
+    ["{{Hauptmietzins}}", hauptmietzins],
+    ["{{mietzins}}", hauptmietzins],
+    ["{{Mietzins}}", hauptmietzins],
+    ["{{kaution}}", kaution],
+    ["{{Kaution}}", kaution],
+    ["{{KAUTION}}", kaution],
     ["{{date}}", date],
     ["{{Date}}", date],
   ]
