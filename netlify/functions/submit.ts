@@ -113,22 +113,12 @@ function contractPdfFilename(kennzeichen: string): string {
 }
 
 type MailSendOptions = {
-  /** Kopie an Antragsteller:in (BCC), wenn ≠ NOTIFY_TO (nur Büromail). */
+  /** Reply-To auf Antragsteller:in — nur Büromail; keine BCC-Kopie (die schickt eine eigene Bestätigung). */
   applicantEmail?: string
-  /** Direkt an diese Adresse (Bestätigung an Kund:in); dann kein automatisches BCC. */
+  /** Direkt an diese Adresse (Bestätigung an Kund:in); dann kein automatisches Reply-To aus applicantEmail. */
   directTo?: string
   /** Reply-To Header (z.&nbsp;B. Büroadresse bei Bestätigung an Antragsteller:in). */
   replyTo?: string
-}
-
-function bccForApplicant(
-  applicantEmail: string | undefined,
-  notifyTo: string,
-): string | undefined {
-  const trimmed = applicantEmail?.trim()
-  if (!trimmed) return undefined
-  if (trimmed.toLowerCase() === notifyTo.trim().toLowerCase()) return undefined
-  return trimmed
 }
 
 /**
@@ -210,10 +200,6 @@ async function sendSmtpEmail(
   const from = resolveSmtpFromEnvelope()
   const notifyTo = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
   const to = options?.directTo?.trim() || notifyTo
-  const bcc =
-    options?.directTo !== undefined
-      ? undefined
-      : bccForApplicant(options?.applicantEmail, notifyTo)
   const replyHeader =
     options?.replyTo?.trim() ||
     (!options?.directTo && options?.applicantEmail
@@ -230,7 +216,6 @@ async function sendSmtpEmail(
     from,
     to,
     ...(replyHeader ? { replyTo: replyHeader } : {}),
-    ...(bcc ? { bcc } : {}),
     subject,
     html,
     attachments: attachments.map((a) => ({
@@ -251,10 +236,6 @@ async function sendResendEmail(
   const notifyTo = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
   const toAddr = options?.directTo?.trim() || notifyTo
   const from = process.env.NOTIFY_FROM!
-  const bcc =
-    options?.directTo !== undefined
-      ? undefined
-      : bccForApplicant(options?.applicantEmail, notifyTo)
   const replyHeader =
     options?.replyTo?.trim() ||
     (!options?.directTo && options?.applicantEmail
@@ -263,7 +244,6 @@ async function sendResendEmail(
   const body: Record<string, unknown> = {
     from,
     to: [toAddr],
-    ...(bcc ? { bcc: [bcc] } : {}),
     ...(replyHeader ? { reply_to: replyHeader } : {}),
     subject,
     html,
