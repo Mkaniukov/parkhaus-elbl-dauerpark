@@ -89,7 +89,7 @@ function contentTypeForFilename(filename: string): string {
 /** Google „Vertrag“ für Dateiname (PDF). */
 function contractPdfFilename(kennzeichen: string): string {
   const safe = kennzeichen
-    .replace(/[^\w\-]+/gu, '_')
+    .replace(/[^\w-]+/gu, '_')
     .replace(/_+/g, '_')
     .slice(0, 40)
   return `Dauerparkvertrag-${safe || 'Antrag'}.pdf`
@@ -110,6 +110,66 @@ function bccForApplicant(
   return trimmed
 }
 
+/**
+ * Gmail/Google Workspace: authentifizierter User (MAIL_USER) muss mit der Absender-Adresse übereinstimmen.
+ * Sonst SMTP 500/535 nach Wechsel von MAIL_USER ohne MAIL_FROM-Anpassung.
+ */
+function resolveSmtpFromEnvelope(): string {
+  const user = process.env.MAIL_USER!.trim()
+  const raw = process.env.MAIL_FROM?.trim()
+  if (!raw) return `"Parkhaus ELBL" <${user}>`
+
+  const m = /<([^>]+)>/.exec(raw)
+  const addrInHeader = (m?.[1] ?? '').trim().toLowerCase()
+  /** Kein Parser-Match → freier Text, lieber MAIL_USER verwenden */
+  if (!addrInHeader) return `"Parkhaus ELBL" <${user}>`
+
+  if (addrInHeader !== user.toLowerCase()) {
+    console.warn(
+      `submit SMTP: MAIL_FROM enthält (${addrInHeader}), MAIL_USER=${user} — Absender angepasst (Google-SMTP-Anforderung).`,
+    )
+    let namePart = raw.split('<')[0]?.trim() ?? ''
+    namePart = namePart.replace(/^["']+|["']+$/g, '').trim() || 'Parkhaus ELBL'
+    return `"${namePart}" <${user}>`
+  }
+
+  return raw
+}
+
+/** Nutzerhilfe bei 500, ohne SMTP-Secrets zu loggen. */
+function publicMailErrorHint(err: unknown): string | undefined {
+  if (!(err instanceof Error)) return undefined
+  const msg = `${err.message} ${'response' in err ? String((err as { response?: string }).response) : ''}`.toLowerCase()
+  const code =
+    typeof (err as NodeJS.ErrnoException).code === 'string'
+      ? (err as NodeJS.ErrnoException).code
+      : ''
+
+  const responseCodeRaw = (err as { responseCode?: number }).responseCode
+  const responseCode =
+    typeof responseCodeRaw === 'number' ? responseCodeRaw : NaN
+
+  if (
+    responseCode === 535 ||
+    responseCode === 534 ||
+    responseCode === 553 ||
+    msg.includes('535') ||
+    msg.includes('invalid login') ||
+    msg.includes('authentication failed')
+  ) {
+    return (
+      'E-Mail-Anmeldung beim SMTP-Server wurde abgewiesen. Prüfen: MAIL_USER und App-Passwort passen zusammen;' +
+      ' MAIL_FROM darf keine andere Gmail/Workspace-Adresse enthalten als MAIL_USER.'
+    )
+  }
+
+  if (code === 'ETIMEDOUT' || msg.includes('timeout'))
+    return 'E-Mail Zeitüberschreitung (SMTP). Später versuchen oder Resend verwenden.'
+  if (code === 'ECONNECTION' || code === 'ECONNREFUSED')
+    return 'Keine SMTP-Verbindung möglich. Host/Port in Netlify prüfen.'
+  return undefined
+}
+
 async function sendSmtpEmail(
   html: string,
   subject: string,
@@ -126,8 +186,7 @@ async function sendSmtpEmail(
         : port === 465
   const user = process.env.MAIL_USER!
   const pass = process.env.MAIL_PASSWORD!.replace(/\s+/g, '')
-  const from =
-    process.env.MAIL_FROM ?? `Parkhaus ELBL <${user}>`
+  const from = resolveSmtpFromEnvelope()
   const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
   const bcc = bccForApplicant(options?.applicantEmail, to)
 
@@ -433,7 +492,11 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     }
   } catch (e) {
     console.error(e)
-    return json(500, { ok: false, error: 'E-Mail konnte nicht gesendet werden.' })
+    const hint = publicMailErrorHint(e)
+    return json(500, {
+      ok: false,
+      error: hint ?? 'E-Mail konnte nicht gesendet werden.',
+    })
   }
 
   const mailSkipped = !hasSmtp && !hasResend
