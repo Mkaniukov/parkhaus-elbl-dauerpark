@@ -33,7 +33,6 @@ function escapeHtml(s: string): string {
 function buildEmailHtml(
   payload: ApplicationPayload,
   options?: {
-    hasWordAttachment?: boolean
     contractDocUrl?: string
     hasContractPdfAttachment?: boolean
   },
@@ -65,11 +64,7 @@ function buildEmailHtml(
   const pdfHinweis = options?.hasContractPdfAttachment
     ? '<p style="margin-top:8px;font-size:14px">Anhang: <strong>PDF-Export</strong> des Vertrags (Vorlage).</p>'
     : ''
-  const anhangWord =
-    options?.hasWordAttachment === true
-      ? '<p style="margin-top:14px;font-size:14px">Anhang: dieselben Antragsdaten als <strong>Microsoft Word (.docx)</strong> zur Bearbeitung.</p>'
-      : ''
-  return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table>${vertragLink}${pdfHinweis}${anhangWord}</body></html>`
+  return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table>${vertragLink}${pdfHinweis}</body></html>`
 }
 
 /** Kurze Bestätigung direkt an Antragsteller:in (ohne Anhänge — weniger Spam-Risiko). */
@@ -301,12 +296,10 @@ async function sendMailWithAttachmentRetry(
   subj: string,
   mailAttachments: MailAttachment[],
   contractFromGoogle: ContractFromGoogle | undefined,
-  wordAttachment: MailAttachment | undefined,
 ): Promise<void> {
   const opts: MailSendOptions = { applicantEmail: data.email }
   const send = transport === 'resend' ? sendResendEmail : sendSmtpEmail
   let html = buildEmailHtml(data, {
-    hasWordAttachment: Boolean(wordAttachment),
     contractDocUrl: contractFromGoogle?.url,
     hasContractPdfAttachment: Boolean(contractFromGoogle?.pdfBuffer),
   })
@@ -319,7 +312,6 @@ async function sendMailWithAttachmentRetry(
         e,
       )
       html = buildEmailHtml(data, {
-        hasWordAttachment: false,
         contractDocUrl: contractFromGoogle?.url,
         hasContractPdfAttachment: false,
       })
@@ -422,15 +414,8 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     process.env.MAIL_INCLUDE_CONTRACT_PDF === 'true'
 
   const shouldMail = hasSmtp || hasResend
-  const buildWordForMail =
-    shouldMail && process.env.SKIP_WORD_ATTACHMENT !== 'true'
-
-  if (shouldMail && process.env.SKIP_WORD_ATTACHMENT === 'true') {
-    console.warn('SKIP_WORD_ATTACHMENT: kein .docx-Anhang')
-  }
 
   let contractFromGoogle: ContractFromGoogle | undefined
-  let wordAttachment: MailAttachment | undefined
 
   if (hasDb) {
     const supabase = createClient(supabaseUrl!, serviceKey!)
@@ -474,16 +459,12 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
           )
         : Promise.resolve(undefined as ContractFromGoogle | undefined)
 
-    ;[contractFromGoogle, wordAttachment] = await Promise.all([
-      contractPromise,
-      tryBuildAntragWord(data, buildWordForMail),
-    ])
+    contractFromGoogle = await contractPromise
   } else {
-    wordAttachment = await tryBuildAntragWord(data, buildWordForMail)
+    contractFromGoogle = undefined
   }
 
   const mailAttachments: MailAttachment[] = []
-  if (wordAttachment) mailAttachments.push(wordAttachment)
   if (mailIncludeContractPdf && contractFromGoogle?.pdfBuffer) {
     mailAttachments.push({
       filename: contractPdfFilename(data.kennzeichen),
@@ -508,7 +489,6 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
           subj,
           mailAttachments,
           contractFromGoogle,
-          wordAttachment,
         )
         mailOk = true
         break
@@ -577,24 +557,6 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
 
   const mailSkipped = !hasSmtp && !hasResend
   return json(200, { ok: true, mailSkipped })
-}
-
-async function tryBuildAntragWord(
-  data: ApplicationPayload,
-  shouldBuild: boolean,
-): Promise<MailAttachment | undefined> {
-  if (!shouldBuild) return undefined
-  try {
-    const mod = await import('./buildAntragDocx')
-    const buf = await mod.buildAntragDocx(data)
-    return {
-      filename: mod.antragDocxFilename(data),
-      content: buf,
-    }
-  } catch (e) {
-    console.error('Word-Anhang konnte nicht erzeugt werden', e)
-    return undefined
-  }
 }
 
 /** Edge Function generate-contract: Doc + URL in DB; optional PDF für Mail-Anhang (teuer bei Timeout/SMTP). */
