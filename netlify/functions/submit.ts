@@ -140,6 +140,11 @@ async function sendSmtpEmail(
   await transporter.sendMail({
     from,
     to,
+    ...(options?.applicantEmail
+      ? {
+          replyTo: options.applicantEmail,
+        }
+      : {}),
     ...(bcc ? { bcc } : {}),
     subject,
     html,
@@ -165,6 +170,9 @@ async function sendResendEmail(
     from,
     to: [to],
     ...(bcc ? { bcc: [bcc] } : {}),
+    ...(options?.applicantEmail
+      ? { reply_to: options.applicantEmail }
+      : {}),
     subject,
     html,
   }
@@ -186,6 +194,42 @@ async function sendResendEmail(
     const t = await r.text()
     console.error('Resend error', r.status, t)
     throw new Error('E-Mail-Versand fehlgeschlagen')
+  }
+}
+
+/** SMTP von Netlify aus oft blockiert — Resend (HTTP) zuerst in der Aufrufkette. */
+async function sendMailWithAttachmentRetry(
+  transport: 'resend' | 'smtp',
+  data: ApplicationPayload,
+  subj: string,
+  mailAttachments: MailAttachment[],
+  contractFromGoogle: ContractFromGoogle | undefined,
+  wordAttachment: MailAttachment | undefined,
+): Promise<void> {
+  const opts: MailSendOptions = { applicantEmail: data.email }
+  const send = transport === 'resend' ? sendResendEmail : sendSmtpEmail
+  let html = buildEmailHtml(data, {
+    hasWordAttachment: Boolean(wordAttachment),
+    contractDocUrl: contractFromGoogle?.url,
+    hasContractPdfAttachment: Boolean(contractFromGoogle?.pdfBuffer),
+  })
+  try {
+    await send(html, subj, mailAttachments, opts)
+  } catch (e) {
+    if (mailAttachments.length > 0) {
+      console.warn(
+        `${transport}: Versand mit Anhang fehlgeschlagen, ohne Anhang wiederholen`,
+        e,
+      )
+      html = buildEmailHtml(data, {
+        hasWordAttachment: false,
+        contractDocUrl: contractFromGoogle?.url,
+        hasContractPdfAttachment: false,
+      })
+      await send(html, subj, [], opts)
+    } else {
+      throw e
+    }
   }
 }
 
@@ -266,6 +310,8 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     hasSmtp,
     hasResend,
     skipContract: process.env.SKIP_GENERATE_CONTRACT === 'true',
+    /** Explizit `true`: PDF-Anhang zur Mail — größer/Timeout-Risiko. */
+    mailAttachContractPdf: process.env.MAIL_INCLUDE_CONTRACT_PDF === 'true',
   })
 
   if (hasSmtp && !hasDb) {
@@ -274,7 +320,21 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     )
   }
 
+  /** Vor PDF-Anhang ging die Mail schneller. Nur bei `MAIL_INCLUDE_CONTRACT_PDF=true`: großes PDF aus der Edge Function + Anhang (Timeout/SMTP-Risiko). */
+  const mailIncludeContractPdf =
+    process.env.MAIL_INCLUDE_CONTRACT_PDF === 'true'
+
+  const shouldMail = hasSmtp || hasResend
+  const buildWordForMail =
+    shouldMail && process.env.SKIP_WORD_ATTACHMENT !== 'true'
+
+  if (shouldMail && process.env.SKIP_WORD_ATTACHMENT === 'true') {
+    console.warn('SKIP_WORD_ATTACHMENT: kein .docx-Anhang')
+  }
+
   let contractFromGoogle: ContractFromGoogle | undefined
+  let wordAttachment: MailAttachment | undefined
+
   if (hasDb) {
     const supabase = createClient(supabaseUrl!, serviceKey!)
     const { data: inserted, error } = await supabase
@@ -307,38 +367,27 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
       })
       return json(500, { ok: false, error: 'Speichern fehlgeschlagen.' })
     }
-    if (inserted?.id && process.env.SKIP_GENERATE_CONTRACT !== 'true') {
-      contractFromGoogle = await fetchGenerateContract(
-        supabaseUrl!,
-        serviceKey!,
-        inserted.id,
-      )
-    }
-  }
+    const contractPromise =
+      inserted?.id && process.env.SKIP_GENERATE_CONTRACT !== 'true'
+        ? fetchGenerateContract(
+            supabaseUrl!,
+            serviceKey!,
+            inserted.id,
+            mailIncludeContractPdf,
+          )
+        : Promise.resolve(undefined as ContractFromGoogle | undefined)
 
-  let wordAttachment: MailAttachment | undefined
-  if (
-    (hasSmtp || hasResend) &&
-    process.env.SKIP_WORD_ATTACHMENT !== 'true'
-  ) {
-    try {
-      // Dynamischer Import: verhindert Absturz beim Cold Start, falls docx nicht lädt
-      const mod = await import('./buildAntragDocx')
-      const buf = await mod.buildAntragDocx(data)
-      wordAttachment = {
-        filename: mod.antragDocxFilename(data),
-        content: buf,
-      }
-    } catch (e) {
-      console.error('Word-Anhang konnte nicht erzeugt werden', e)
-    }
-  } else if (process.env.SKIP_WORD_ATTACHMENT === 'true') {
-    console.warn('SKIP_WORD_ATTACHMENT: kein .docx-Anhang')
+    ;[contractFromGoogle, wordAttachment] = await Promise.all([
+      contractPromise,
+      tryBuildAntragWord(data, buildWordForMail),
+    ])
+  } else {
+    wordAttachment = await tryBuildAntragWord(data, buildWordForMail)
   }
 
   const mailAttachments: MailAttachment[] = []
   if (wordAttachment) mailAttachments.push(wordAttachment)
-  if (contractFromGoogle?.pdfBuffer) {
+  if (mailIncludeContractPdf && contractFromGoogle?.pdfBuffer) {
     mailAttachments.push({
       filename: contractPdfFilename(data.kennzeichen),
       content: contractFromGoogle.pdfBuffer,
@@ -348,58 +397,35 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
   const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
 
   try {
-    let html = buildEmailHtml(data, {
-      hasWordAttachment: Boolean(wordAttachment),
-      contractDocUrl: contractFromGoogle?.url,
-      hasContractPdfAttachment: Boolean(contractFromGoogle?.pdfBuffer),
-    })
-    if (hasSmtp) {
+    const mailChain: ('resend' | 'smtp')[] = []
+    if (hasResend) mailChain.push('resend')
+    if (hasSmtp) mailChain.push('smtp')
+
+    let mailOk = false
+    let lastMailErr: unknown
+    for (const t of mailChain) {
       try {
-        await sendSmtpEmail(html, subj, mailAttachments, {
-          applicantEmail: data.email,
-        })
+        await sendMailWithAttachmentRetry(
+          t,
+          data,
+          subj,
+          mailAttachments,
+          contractFromGoogle,
+          wordAttachment,
+        )
+        mailOk = true
+        break
       } catch (e) {
-        if (mailAttachments.length > 0) {
-          console.warn(
-            'SMTP mit Anhang fehlgeschlagen, ohne Anhang wiederholen',
-            e,
-          )
-          html = buildEmailHtml(data, {
-            hasWordAttachment: false,
-            contractDocUrl: contractFromGoogle?.url,
-            hasContractPdfAttachment: false,
-          })
-          await sendSmtpEmail(html, subj, [], {
-            applicantEmail: data.email,
-          })
-        } else {
-          throw e
-        }
+        lastMailErr = e
+        console.error(`submit: E-Mail via ${t} fehlgeschlagen`, e)
       }
-    } else if (hasResend) {
-      try {
-        await sendResendEmail(html, subj, mailAttachments, {
-          applicantEmail: data.email,
-        })
-      } catch (e) {
-        if (mailAttachments.length > 0) {
-          console.warn(
-            'Resend mit Anhang fehlgeschlagen, ohne Anhang wiederholen',
-            e,
-          )
-          html = buildEmailHtml(data, {
-            hasWordAttachment: false,
-            contractDocUrl: contractFromGoogle?.url,
-            hasContractPdfAttachment: false,
-          })
-          await sendResendEmail(html, subj, [], {
-            applicantEmail: data.email,
-          })
-        } else {
-          throw e
-        }
-      }
-    } else {
+    }
+
+    if (!mailOk && mailChain.length > 0) {
+      throw lastMailErr
+    }
+
+    if (!mailOk && mailChain.length === 0) {
       console.error(
         'submit: KEIN E-Mail-Versand — in Netlify Production fehlen MAIL_USER/MAIL_PASSWORD oder (RESEND_API_KEY + NOTIFY_FROM). Daten wurden ggf. gespeichert.',
         { hasDb },
@@ -414,11 +440,30 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
   return json(200, { ok: true, mailSkipped })
 }
 
-/** Edge Function generate-contract: Doc + URL in DB; mit return_pdf auch PDF-Bytes für Mail. */
+async function tryBuildAntragWord(
+  data: ApplicationPayload,
+  shouldBuild: boolean,
+): Promise<MailAttachment | undefined> {
+  if (!shouldBuild) return undefined
+  try {
+    const mod = await import('./buildAntragDocx')
+    const buf = await mod.buildAntragDocx(data)
+    return {
+      filename: mod.antragDocxFilename(data),
+      content: buf,
+    }
+  } catch (e) {
+    console.error('Word-Anhang konnte nicht erzeugt werden', e)
+    return undefined
+  }
+}
+
+/** Edge Function generate-contract: Doc + URL in DB; optional PDF für Mail-Anhang (teuer bei Timeout/SMTP). */
 async function fetchGenerateContract(
   supabaseUrl: string,
   serviceKey: string,
   recordId: string,
+  requestPdfFromEdge: boolean,
 ): Promise<ContractFromGoogle | undefined> {
   const url = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/generate-contract`
   try {
@@ -428,7 +473,10 @@ async function fetchGenerateContract(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${serviceKey}`,
       },
-      body: JSON.stringify({ record_id: recordId, return_pdf: true }),
+      body: JSON.stringify({
+      record_id: recordId,
+      return_pdf: requestPdfFromEdge,
+    }),
     })
     const text = await r.text()
     if (!r.ok) {
