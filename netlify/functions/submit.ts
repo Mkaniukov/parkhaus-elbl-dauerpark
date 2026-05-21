@@ -72,6 +72,28 @@ function buildEmailHtml(
   return `<!DOCTYPE html><html><body><h2>Neuer Dauerpark-Antrag</h2><table>${table}</table>${vertragLink}${pdfHinweis}${anhangWord}</body></html>`
 }
 
+/** Kurze Bestätigung direkt an Antragsteller:in (ohne Anhänge — weniger Spam-Risiko). */
+function buildApplicantConfirmationHtml(
+  nameFirma: string,
+  officeMailto: string,
+): string {
+  const safeOffice = escapeHtml(officeMailto.trim())
+  const suffix =
+    nameFirma.trim().length > 0
+      ? `<p style="margin-top:14px;font-size:14px;color:#4b5563">Bezug: <strong>${escapeHtml(nameFirma.trim())}</strong></p>`
+      : ''
+  return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"/></head><body style="font-family:Segoe UI,system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.55;color:#1a1f2e;max-width:36rem;margin:0;padding:16px">
+<p>Sehr geehrte Damen und Herren,</p>
+<p>vielen Dank für Ihre Online-Anmeldung eines <strong>Dauerparkplatzes</strong> bei Parkhaus ELBL.</p>
+<p>Wir haben Ihre Daten erfolgreich erhalten und werden sie schnellstmöglich bearbeiten. Bei offenen Punkten oder weiteren Schritten meldet sich eine Kollegin oder ein Kollege bei Ihnen.</p>
+<p>Bis dahin bitten wir Sie um ein wenig Geduld — wir kümmern uns zeitnah um Ihre Anfrage.</p>
+${suffix}
+<hr style="border:none;border-top:1px solid #e5e7eb;margin:22px 0"/>
+<p style="font-size:13px;color:#6b7280">Mit freundlichen Grüßen<br/><strong>Parkhaus ELBL</strong></p>
+<p style="font-size:13px;color:#6b7280">Bei Fragen erreichen Sie uns unter <a href="mailto:${safeOffice}">${safeOffice}</a>.</p>
+</body></html>`
+}
+
 /** Google Workspace / Gmail SMTP (App-Passwort ohne Leerzeichen). */
 type MailAttachment = { filename: string; content: Buffer }
 
@@ -96,8 +118,12 @@ function contractPdfFilename(kennzeichen: string): string {
 }
 
 type MailSendOptions = {
-  /** Kopie an Antragsteller:in (BCC), wenn ≠ NOTIFY_TO */
+  /** Kopie an Antragsteller:in (BCC), wenn ≠ NOTIFY_TO (nur Büromail). */
   applicantEmail?: string
+  /** Direkt an diese Adresse (Bestätigung an Kund:in); dann kein automatisches BCC. */
+  directTo?: string
+  /** Reply-To Header (z.&nbsp;B. Büroadresse bei Bestätigung an Antragsteller:in). */
+  replyTo?: string
 }
 
 function bccForApplicant(
@@ -187,8 +213,17 @@ async function sendSmtpEmail(
   const user = process.env.MAIL_USER!
   const pass = process.env.MAIL_PASSWORD!.replace(/\s+/g, '')
   const from = resolveSmtpFromEnvelope()
-  const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
-  const bcc = bccForApplicant(options?.applicantEmail, to)
+  const notifyTo = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
+  const to = options?.directTo?.trim() || notifyTo
+  const bcc =
+    options?.directTo !== undefined
+      ? undefined
+      : bccForApplicant(options?.applicantEmail, notifyTo)
+  const replyHeader =
+    options?.replyTo?.trim() ||
+    (!options?.directTo && options?.applicantEmail
+      ? options.applicantEmail.trim()
+      : undefined)
 
   const transporter = nodemailer.createTransport({
     host,
@@ -199,11 +234,7 @@ async function sendSmtpEmail(
   await transporter.sendMail({
     from,
     to,
-    ...(options?.applicantEmail
-      ? {
-          replyTo: options.applicantEmail,
-        }
-      : {}),
+    ...(replyHeader ? { replyTo: replyHeader } : {}),
     ...(bcc ? { bcc } : {}),
     subject,
     html,
@@ -222,16 +253,23 @@ async function sendResendEmail(
   options?: MailSendOptions,
 ) {
   const key = process.env.RESEND_API_KEY!
-  const to = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
+  const notifyTo = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
+  const toAddr = options?.directTo?.trim() || notifyTo
   const from = process.env.NOTIFY_FROM!
-  const bcc = bccForApplicant(options?.applicantEmail, to)
+  const bcc =
+    options?.directTo !== undefined
+      ? undefined
+      : bccForApplicant(options?.applicantEmail, notifyTo)
+  const replyHeader =
+    options?.replyTo?.trim() ||
+    (!options?.directTo && options?.applicantEmail
+      ? options.applicantEmail.trim()
+      : undefined)
   const body: Record<string, unknown> = {
     from,
-    to: [to],
+    to: [toAddr],
     ...(bcc ? { bcc: [bcc] } : {}),
-    ...(options?.applicantEmail
-      ? { reply_to: options.applicantEmail }
-      : {}),
+    ...(replyHeader ? { reply_to: replyHeader } : {}),
     subject,
     html,
   }
@@ -489,6 +527,44 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
         'submit: KEIN E-Mail-Versand — in Netlify Production fehlen MAIL_USER/MAIL_PASSWORD oder (RESEND_API_KEY + NOTIFY_FROM). Daten wurden ggf. gespeichert.',
         { hasDb },
       )
+    }
+
+    /** Separates Bestätigung an Antragsteller:in — ohne Anhänge; schlägt nicht den gesamten Antrag fehl. */
+    const applicantAddr = data.email.trim()
+    const notifyAddr = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
+    if (mailOk && mailChain.length > 0 && applicantAddr.length > 0) {
+      const confirmHtml = buildApplicantConfirmationHtml(
+        data.name_firma,
+        notifyAddr,
+      )
+      const confirmSubj =
+        'Bestätigung: Ihre Dauerpark-Anmeldung ist eingegangen'
+      const confirmOpts: MailSendOptions = {
+        directTo: applicantAddr,
+        replyTo: notifyAddr,
+      }
+      let confirmOk = false
+      let confirmLastErr: unknown
+      for (const t of mailChain) {
+        try {
+          const send = t === 'resend' ? sendResendEmail : sendSmtpEmail
+          await send(confirmHtml, confirmSubj, [], confirmOpts)
+          confirmOk = true
+          break
+        } catch (e) {
+          confirmLastErr = e
+          console.error(
+            `submit: Bestätigung an Antragsteller:in via ${t} fehlgeschlagen`,
+            e,
+          )
+        }
+      }
+      if (!confirmOk) {
+        console.error(
+          'submit: Bestätigungsmail an Antragsteller:in nicht zustellbar',
+          confirmLastErr,
+        )
+      }
     }
   } catch (e) {
     console.error(e)
