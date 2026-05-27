@@ -42,6 +42,7 @@ function buildEmailHtml(
     ['Adresse', payload.adresse],
     ['Telefon', payload.telefon],
     ['E-Mail', payload.email],
+    ['Stellplatz-Nutzer', payload.stellplatz_nutzer.trim() || '—'],
     ['Beginn', payload.beginn],
     ['Garage', garageLabel(payload.garage)],
     ['Fahrzeug', payload.fahrzeug],
@@ -406,6 +407,10 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
         adresse: data.adresse,
         telefon: data.telefon,
         email: data.email,
+        stellplatz_nutzer: (() => {
+          const s = data.stellplatz_nutzer.trim()
+          return s.length > 0 ? s : null
+        })(),
         beginn: data.beginn,
         fahrzeug: data.fahrzeug,
         kennzeichen: data.kennzeichen,

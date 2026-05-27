@@ -9,6 +9,7 @@ import {
   DEFAULT_GARAGE_ID,
   DEFAULT_TARIF_ID,
   GARAGEN,
+  AGB_PDF_URL,
   getTarifeForGarage,
   KAUTION_EUR,
   KUENDIGUNG_HINWEIS,
@@ -26,6 +27,7 @@ const defaultValues: ApplicationFormInput = {
   iban: '',
   bic: '',
   lautend_auf: '',
+  stellplatz_nutzer: '',
   tarif: DEFAULT_TARIF_ID,
   garage: DEFAULT_GARAGE_ID,
   agb_akzeptiert: false,
@@ -64,7 +66,8 @@ export function ApplicationForm() {
   })
 
   const garageWatch = useWatch({ control, name: 'garage' })
-  const tarifeAktuell = getTarifeForGarage(garageWatch ?? DEFAULT_GARAGE_ID)
+  const garageId = garageWatch ?? DEFAULT_GARAGE_ID
+  const tarifeAktuell = getTarifeForGarage(garageId)
 
   useEffect(() => {
     const gid = garageWatch ?? DEFAULT_GARAGE_ID
@@ -153,6 +156,19 @@ export function ApplicationForm() {
           <span>E-Mail *</span>
           <input type="email" autoComplete="email" {...register('email')} />
           {errors.email && <span className="err">{errors.email.message}</span>}
+        </label>
+
+        <label className="field field-wide">
+          <span>Stellplatz-Nutzer (optional)</span>
+          <input
+            type="text"
+            autoComplete="name"
+            placeholder="Falls andere Person das Fahrzeug nutzt als Name/Firma oben …"
+            {...register('stellplatz_nutzer')}
+          />
+          {errors.stellplatz_nutzer && (
+            <span className="err">{errors.stellplatz_nutzer.message}</span>
+          )}
         </label>
 
         <label className="field">
@@ -246,7 +262,18 @@ export function ApplicationForm() {
 
         <label className="check">
           <input type="checkbox" {...register('agb_akzeptiert')} />
-          <span>Ich habe die AGB zur Kenntnis genommen und akzeptiere sie.</span>
+          <span>
+            Ich habe die{' '}
+            <a
+              href={AGB_PDF_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Vertragsbedingungen (AGB)
+            </a>{' '}
+            gelesen und akzeptiere sie.
+          </span>
         </label>
         {errors.agb_akzeptiert && (
           <span className="err">{errors.agb_akzeptiert.message}</span>

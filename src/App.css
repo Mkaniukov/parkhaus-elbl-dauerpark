@@ -172,6 +172,12 @@
 
 .check a {
   color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.check a:hover {
+  text-decoration-thickness: 2px;
 }
 
 .hp {

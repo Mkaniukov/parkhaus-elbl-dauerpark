@@ -302,3 +302,6 @@ export const KAUTION_EUR = 400
 export const MIN_VERTRAG_MONATE = 3
 export const KUENDIGUNG_HINWEIS =
   'Mindestvertragsdauer 3 Monate, Kündigungsfrist ein Monat zum Monatsletzten.'
+
+/** Ein AGB-PDF für alle Garagen (Datei unter `public/docs/agb/`). */
+export const AGB_PDF_URL = '/docs/agb/Vertragsbedingungen-Reichsbruecke.pdf'

@@ -36,6 +36,8 @@ type Row = {
   adresse: string
   telefon: string
   email: string
+  /** optional: abweichende Stellplatnutzer:in */
+  stellplatz_nutzer?: string | null
   fahrzeug: string
   kennzeichen: string
   tarif: string
@@ -251,7 +253,7 @@ serve(async (req: Request) => {
   const { data: row, error: fetchErr } = await supabase
     .from("dauerpark_antraege")
     .select(
-      "id, name_firma, adresse, telefon, email, fahrzeug, kennzeichen, tarif, garage, beginn",
+      "id, name_firma, adresse, telefon, email, stellplatz_nutzer, fahrzeug, kennzeichen, tarif, garage, beginn",
     )
     .eq("id", recordId)
     .maybeSingle()
@@ -271,11 +273,15 @@ serve(async (req: Request) => {
   const hauptmietzins = resolveHauptmietzinsEUR(r.tarif)
   const kaution = resolveKautionEURDisplay()
   /** Platzhalter im Google-Doc → Wert (Templates variieren: {{name_firma}} vs {{name}}). */
+  const sn = r.stellplatz_nutzer?.trim() || "—"
   const placeholderPairs: [string, string][] = [
     ["{{name_firma}}", r.name_firma],
     ["{{adresse}}", r.adresse],
     ["{{telefon}}", r.telefon],
     ["{{email}}", r.email],
+    ["{{stellplatz_nutzer}}", sn],
+    ["{{Stellplatz-Nutzer}}", sn],
+    ["{{stellplatzNutzer}}", sn],
     ["{{fahrzeug}}", r.fahrzeug],
     ["{{Fahrzeug}}", r.fahrzeug],
     ["{{kennzeichen}}", r.kennzeichen],

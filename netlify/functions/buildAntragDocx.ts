@@ -56,6 +56,7 @@ export async function buildAntragDocx(
     ['Adresse', payload.adresse],
     ['Telefon', payload.telefon],
     ['E-Mail', payload.email],
+    ['Stellplatz-Nutzer', payload.stellplatz_nutzer.trim() || '—'],
     ['Beginn (gewünscht)', formatDateDE(payload.beginn)],
     ['Garage (Bezeichnung)', garageLabel(payload.garage)],
     ['Garage (Vertragsort)', garageVertragsadresse(payload.garage)],

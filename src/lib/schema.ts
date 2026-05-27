@@ -37,6 +37,7 @@ export const applicationPayloadSchema = z
         return t ? t.toUpperCase() : undefined
       }),
     lautend_auf: z.string().min(2, 'Kontoinhaber / lautend auf'),
+    stellplatz_nutzer: z.string().max(180).default(''),
     tarif: z.enum(allTarifIds),
     garage: z.enum(garageIds),
     agb_akzeptiert: z
