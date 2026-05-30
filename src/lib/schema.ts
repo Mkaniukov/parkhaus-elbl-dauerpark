@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { GARAGEN, getTarifeForGarage } from './constants'
+import { isValidEuIban, normalizeIban } from './iban'
 
 const garageIds = GARAGEN.map((g) => g.id) as [string, ...string[]]
 
@@ -8,16 +9,12 @@ const allTarifIds = GARAGEN.flatMap((g) => g.tarife.map((t) => t.id)) as [
   ...string[],
 ]
 
-function normalizeIban(raw: string): string {
-  return raw.replace(/\s+/g, '').toUpperCase()
-}
-
-/** AT-IBAN: 20 Zeichen gesamt (AT + 18 Ziffern). */
-const ibanAt = z
+/** IBAN eines EU-Mitgliedstaats (Länge je Land + MOD-97). */
+const ibanEu = z
   .string()
   .min(1, 'IBAN erforderlich')
   .transform(normalizeIban)
-  .refine((v) => /^AT\d{18}$/.test(v), 'Ungültige österreichische IBAN')
+  .refine(isValidEuIban, 'Ungültige IBAN (EU-Mitgliedstaat)')
 
 export const applicationPayloadSchema = z
   .object({
@@ -28,7 +25,7 @@ export const applicationPayloadSchema = z
     beginn: z.string().min(1, 'Beginn wählen'),
     fahrzeug: z.string().min(2, 'Fahrzeug (Marke / Typ)'),
     kennzeichen: z.string().min(2, 'Kennzeichen'),
-    iban: ibanAt,
+    iban: ibanEu,
     bic: z
       .string()
       .optional()

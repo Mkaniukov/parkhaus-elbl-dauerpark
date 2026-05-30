@@ -222,12 +222,12 @@ export function ApplicationForm() {
         </label>
 
         <label className="field">
-          <span>IBAN (AT) *</span>
+          <span>IBAN (EU) *</span>
           <input
             type="text"
             inputMode="text"
             autoComplete="off"
-            placeholder="AT00 …"
+            placeholder="z. B. AT61 … oder DE89 …"
             {...register('iban')}
           />
           {errors.iban && <span className="err">{errors.iban.message}</span>}
