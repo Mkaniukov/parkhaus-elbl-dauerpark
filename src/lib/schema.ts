@@ -1,13 +1,6 @@
 import { z } from 'zod'
-import { GARAGEN, getTarifeForGarage } from './constants'
+import { getCatalog } from './catalogSnapshot'
 import { isValidEuIban, normalizeIban } from './iban'
-
-const garageIds = GARAGEN.map((g) => g.id) as [string, ...string[]]
-
-const allTarifIds = GARAGEN.flatMap((g) => g.tarife.map((t) => t.id)) as [
-  string,
-  ...string[],
-]
 
 /** IBAN eines EU-Mitgliedstaats (Länge je Land + MOD-97). */
 const ibanEu = z
@@ -35,8 +28,8 @@ export const applicationPayloadSchema = z
       }),
     lautend_auf: z.string().min(2, 'Kontoinhaber / lautend auf'),
     stellplatz_nutzer: z.string().max(180).default(''),
-    tarif: z.enum(allTarifIds),
-    garage: z.enum(garageIds),
+    tarif: z.string().min(1, 'Tarif wählen'),
+    garage: z.string().min(1, 'Garage wählen'),
     agb_akzeptiert: z
       .boolean()
       .refine((v) => v === true, 'AGB müssen akzeptiert werden'),
@@ -48,7 +41,16 @@ export const applicationPayloadSchema = z
       .refine((v) => v === true, 'Datenschutzerklärung muss akzeptiert werden'),
   })
   .superRefine((data, ctx) => {
-    const allowed = new Set(getTarifeForGarage(data.garage).map((t) => t.id))
+    const garage = getCatalog().garagen.find((g) => g.id === data.garage)
+    if (!garage) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Garage wählen.',
+        path: ['garage'],
+      })
+      return
+    }
+    const allowed = new Set(garage.tarife.map((t) => t.id))
     if (!allowed.has(data.tarif)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

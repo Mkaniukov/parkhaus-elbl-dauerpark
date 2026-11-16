@@ -1,0 +1,211 @@
+.admin-layout {
+  max-width: 920px;
+}
+
+.admin-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.admin-links {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.875rem;
+}
+
+.admin-links a,
+.admin-links button.linkish {
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.admin-links a:hover,
+.admin-links button.linkish:hover {
+  text-decoration: underline;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+}
+
+.tab,
+.btn,
+.btn-ghost,
+.btn-danger {
+  font: inherit;
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+
+.tab,
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn:disabled,
+.btn-ghost:disabled,
+.btn-danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--err-border);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  margin: 0.35rem 0 0;
+}
+
+.garage-card,
+.panel-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.card-head h2,
+.panel-card h2 {
+  font-size: 1.05rem;
+  margin: 0;
+  font-weight: 600;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.check-inline {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  font-size: 0.875rem;
+  margin: 0.35rem 0 0.75rem;
+}
+
+.tarif-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(7rem, 0.7fr) minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: end;
+  margin-bottom: 0.55rem;
+}
+
+.tarif-row label,
+.stack-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  min-width: 0;
+}
+
+.tarif-row input,
+.stack-fields input,
+.stack-fields textarea,
+.login-box input {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+  min-width: 0;
+}
+
+.stack-fields {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.stack-fields textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.preview {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.antrag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.antrag-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  font-size: 0.875rem;
+}
+
+.antrag-card strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.login-box {
+  max-width: 26rem;
+}
+
+@media (max-width: 720px) {
+  .admin-top,
+  .card-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tarif-row {
+    grid-template-columns: 1fr;
+  }
+}

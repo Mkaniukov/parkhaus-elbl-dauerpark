@@ -8,13 +8,8 @@ import {
 import {
   DEFAULT_GARAGE_ID,
   DEFAULT_TARIF_ID,
-  GARAGEN,
-  AGB_PDF_URL,
-  getTarifeForGarage,
-  KAUTION_EUR,
-  KUENDIGUNG_HINWEIS,
-  MIN_VERTRAG_MONATE,
 } from '../lib/constants'
+import type { PublicCatalog } from '../lib/catalogModel'
 
 const defaultValues: ApplicationFormInput = {
   name_firma: '',
@@ -42,7 +37,7 @@ function submitEndpoint(): string {
   return '/.netlify/functions/submit'
 }
 
-export function ApplicationForm() {
+export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
   /** Honeypot: Wert nur beim Submit lesen (vermeidet Autofill/State-Fehler). */
   const companyWebsiteTrapRef = useRef<HTMLInputElement>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>(
@@ -66,19 +61,26 @@ export function ApplicationForm() {
   })
 
   const garageWatch = useWatch({ control, name: 'garage' })
-  const garageId = garageWatch ?? DEFAULT_GARAGE_ID
-  const tarifeAktuell = getTarifeForGarage(garageId)
+  const garageId = garageWatch ?? catalog.garagen[0]?.id ?? DEFAULT_GARAGE_ID
+  const tarifeAktuell =
+    catalog.garagen.find((g) => g.id === garageId)?.tarife ?? []
 
   useEffect(() => {
-    const gid = garageWatch ?? DEFAULT_GARAGE_ID
-    const list = getTarifeForGarage(gid)
+    const ids = catalog.garagen.map((g) => g.id)
+    const currentGarage = getValues('garage')
+    const gid = ids.includes(currentGarage) ? currentGarage : ids[0]
+    if (gid && gid !== currentGarage) {
+      setValue('garage', gid)
+    }
+    const list =
+      catalog.garagen.find((g) => g.id === (gid ?? currentGarage))?.tarife ?? []
     const first = list[0]?.id
     if (!first) return
     const current = getValues('tarif')
     if (!list.some((t) => t.id === current)) {
       setValue('tarif', first, { shouldValidate: true })
     }
-  }, [garageWatch, getValues, setValue])
+  }, [catalog, garageWatch, getValues, setValue])
 
   const onSubmit = handleSubmit(async (data) => {
     setStatus('loading')
@@ -111,20 +113,37 @@ export function ApplicationForm() {
           : 'Vielen Dank! Ihre Angaben wurden übermittelt.',
       )
       if (companyWebsiteTrapRef.current) companyWebsiteTrapRef.current.value = ''
-      reset(defaultValues)
+      const firstGarage = catalog.garagen[0]
+      reset({
+        ...defaultValues,
+        garage: firstGarage?.id ?? DEFAULT_GARAGE_ID,
+        tarif: firstGarage?.tarife[0]?.id ?? DEFAULT_TARIF_ID,
+      })
     } catch {
       setStatus('err')
       setMessage('Netzwerkfehler. Bitte später erneut versuchen.')
     }
   })
 
+  if (catalog.garagen.length === 0) {
+    return (
+      <p className="banner warn">
+        Derzeit ist keine Garage für die Online-Anmeldung freigeschaltet.
+      </p>
+    )
+  }
+
   return (
     <form className="form" onSubmit={onSubmit} noValidate>
       <p className="lede">
         Anmeldung Dauerparkplatz — Daten werden an{' '}
-        <a href="mailto:office@parkhaus-elbl.at">office@parkhaus-elbl.at</a>{' '}
-        gesendet und in der Datenbank gespeichert. Kaution {KAUTION_EUR} €.
-        Mindestvertragsdauer {MIN_VERTRAG_MONATE} Monate. {KUENDIGUNG_HINWEIS}
+        <a href={`mailto:${catalog.settings.publicEmail}`}>
+          {catalog.settings.publicEmail}
+        </a>{' '}
+        gesendet und in der Datenbank gespeichert. Kaution{' '}
+        {catalog.settings.kationEur} €. Mindestvertragsdauer{' '}
+        {catalog.settings.minVertragMonate} Monate.{' '}
+        {catalog.settings.kuendigungHinweis}
       </p>
 
       <div className="field-grid">
@@ -182,7 +201,7 @@ export function ApplicationForm() {
         <label className="field">
           <span>Garage / Standort *</span>
           <select {...register('garage')}>
-            {GARAGEN.map((g) => (
+            {catalog.garagen.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.label}
               </option>
@@ -214,7 +233,7 @@ export function ApplicationForm() {
           <select {...register('tarif')}>
             {tarifeAktuell.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.label} — {t.detail}
+                {t.detail ? `${t.label} — ${t.detail}` : t.label}
               </option>
             ))}
           </select>
@@ -265,7 +284,7 @@ export function ApplicationForm() {
           <span>
             Ich habe die{' '}
             <a
-              href={AGB_PDF_URL}
+              href={catalog.settings.agbPdfUrl}
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}

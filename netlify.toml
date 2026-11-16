@@ -9,6 +9,16 @@
   command = "npm run dev"
   targetPort = 5173
 
+[[redirects]]
+  from = "/admin"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/admin/*"
+  to = "/index.html"
+  status = 200
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"

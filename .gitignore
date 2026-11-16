@@ -17,6 +17,7 @@ supabase/.temp
 !.env.example
 dist
 dist-ssr
+data/
 *.local
 
 # Editor directories and files

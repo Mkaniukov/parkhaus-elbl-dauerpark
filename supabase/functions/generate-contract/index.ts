@@ -10,7 +10,7 @@
  * Secrets (Supabase Dashboard → Edge Functions → Secrets):
  * - GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_PROJECT_ID, GOOGLE_DOC_ID
  * - optional: GOOGLE_DRIVE_PARENT_FOLDER_ID — Zielordner (z. B. Shared Drive), sonst Speicher des Service-Accounts (oft schnell voll)
- * - optional: CONTRACT_KAUTION_EUR — Kaution für Platzhalter {{kaution}} (Standard „400“, de-AT formatiert wie im Vertrag „400,00 €“)
+ * - optional: CONTRACT_KAUTION_EUR — Fallback für {{kaution}}, wenn in der Verwaltung kein Kautionsbetrag steht
  * - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (meist automatisch gesetzt)
  *
  * Service Account braucht Zugriff auf die Vorlage (Freigabe „Bearbeiten“).
@@ -20,8 +20,10 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1"
 import { JWT } from "npm:google-auth-library@9.14.2"
 import {
-  resolveHauptmietzinsEUR,
+  extractHauptmietzinsFromLabel,
+  formatEURdeAT,
   resolveKautionEURDisplay,
+  tariffLabelOrEmpty,
 } from "../_shared/contractPricing.ts"
 
 const corsHeaders: Record<string, string> = {
@@ -201,6 +203,70 @@ function normalizeFolderId(raw: string | undefined): string | undefined {
   return t.split("/")[0]!.split("?")[0]!
 }
 
+async function contractCatalogExtras(
+  supabase: ReturnType<typeof createClient>,
+  r: Row,
+): Promise<{
+  tarifLabel?: string
+  garageLabel?: string
+  garageVertragsadresse?: string
+  kaution?: string
+}> {
+  const out: {
+    tarifLabel?: string
+    garageLabel?: string
+    garageVertragsadresse?: string
+    kaution?: string
+  } = {}
+  const snap = await supabase
+    .from("dauerpark_antraege")
+    .select("tarif_label, garage_label, garage_vertragsadresse")
+    .eq("id", r.id)
+    .maybeSingle()
+  if (!snap.error && snap.data) {
+    const d = snap.data as {
+      tarif_label?: string | null
+      garage_label?: string | null
+      garage_vertragsadresse?: string | null
+    }
+    if (d.tarif_label?.trim()) out.tarifLabel = d.tarif_label.trim()
+    if (d.garage_label?.trim()) out.garageLabel = d.garage_label.trim()
+    if (d.garage_vertragsadresse?.trim()) {
+      out.garageVertragsadresse = d.garage_vertragsadresse.trim()
+    }
+  }
+  if (!out.tarifLabel) {
+    const tarif = await supabase.from("tarife").select("label").eq("id", r.tarif).maybeSingle()
+    const label = (tarif.data as { label?: string } | null)?.label
+    if (!tarif.error && label?.trim()) out.tarifLabel = label.trim()
+  }
+  if (!out.garageVertragsadresse || !out.garageLabel) {
+    const garage = await supabase
+      .from("garagen")
+      .select("label, vertrags_adresse")
+      .eq("id", r.garage)
+      .maybeSingle()
+    const rowG = garage.data as { label?: string; vertrags_adresse?: string } | null
+    if (!garage.error && rowG) {
+      if (!out.garageLabel && rowG.label?.trim()) out.garageLabel = rowG.label.trim()
+      if (!out.garageVertragsadresse && rowG.vertrags_adresse?.trim()) {
+        out.garageVertragsadresse = rowG.vertrags_adresse.trim()
+      }
+    }
+  }
+  const kaution = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "kation_eur")
+    .maybeSingle()
+  const raw = (kaution.data as { value?: string } | null)?.value
+  if (!kaution.error && raw?.trim()) {
+    const n = Number(raw.trim().replace(",", "."))
+    if (Number.isFinite(n) && n >= 0) out.kaution = formatEURdeAT(n)
+  }
+  return out
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -267,11 +333,16 @@ serve(async (req: Request) => {
   }
 
   const r = row as Row
+  const extras = await contractCatalogExtras(supabase, r)
+  const tarifLabel = extras.tarifLabel || tariffLabelOrEmpty(r.tarif)
+  const hauptmietzins = tarifLabel
+    ? extractHauptmietzinsFromLabel(tarifLabel) ?? "—"
+    : "—"
+  const kaution = extras.kaution ?? resolveKautionEURDisplay()
+  const garageText = extras.garageVertragsadresse || extras.garageLabel || r.garage
+  const tarifText = tarifLabel || r.tarif
   const { name, surname } = splitNameFirma(r.name_firma)
   const date = formatDateDE(r.beginn)
-  /** aus Tarif-Label (gemeinsame Tabelle mit Frontend), vgl. `_shared/tarifLabels.ts` */
-  const hauptmietzins = resolveHauptmietzinsEUR(r.tarif)
-  const kaution = resolveKautionEURDisplay()
   /** Platzhalter im Google-Doc → Wert (Templates variieren: {{name_firma}} vs {{name}}). */
   const sn = r.stellplatz_nutzer?.trim() || "—"
   const placeholderPairs: [string, string][] = [
@@ -286,10 +357,10 @@ serve(async (req: Request) => {
     ["{{Fahrzeug}}", r.fahrzeug],
     ["{{kennzeichen}}", r.kennzeichen],
     ["{{Kennzeichen}}", r.kennzeichen],
-    ["{{garage}}", r.garage],
-    ["{{Garage}}", r.garage],
-    ["{{tarif}}", r.tarif],
-    ["{{Tarif}}", r.tarif],
+    ["{{garage}}", garageText],
+    ["{{Garage}}", garageText],
+    ["{{tarif}}", tarifText],
+    ["{{Tarif}}", tarifText],
     ["{{beginn}}", date],
     ["{{Beginn}}", date],
     ["{{Kunden-Nr.}}", "—"],

@@ -2,7 +2,10 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import nodemailer from 'nodemailer'
 import { applicationPayloadSchema, type ApplicationPayload } from '../../src/lib/schema'
-import { GARAGEN, formatTarifLine } from '../../src/lib/constants'
+import { formatTarifLine } from '../../src/lib/constants'
+import { parseEmailList, tarifLine } from '../../src/lib/catalogModel'
+import { setCatalog } from '../../src/lib/catalogSnapshot'
+import { loadCatalog, type LoadedCatalog } from './catalogStore'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,8 +21,8 @@ function json(statusCode: number, body: object) {
   }
 }
 
-function garageLabel(id: string): string {
-  return GARAGEN.find((g) => g.id === id)?.label ?? id
+function garageLabel(id: string, loaded?: LoadedCatalog): string {
+  return loaded?.publicCatalog.garagen.find((g) => g.id === id)?.label ?? id
 }
 
 function escapeHtml(s: string): string {
@@ -35,6 +38,8 @@ function buildEmailHtml(
   options?: {
     contractDocUrl?: string
     hasContractPdfAttachment?: boolean
+    garageName?: string
+    tarifText?: string
   },
 ): string {
   const rows: [string, string][] = [
@@ -44,10 +49,10 @@ function buildEmailHtml(
     ['E-Mail', payload.email],
     ['Stellplatz-Nutzer', payload.stellplatz_nutzer.trim() || '—'],
     ['Beginn', payload.beginn],
-    ['Garage', garageLabel(payload.garage)],
+    ['Garage', options?.garageName ?? garageLabel(payload.garage)],
     ['Fahrzeug', payload.fahrzeug],
     ['Kennzeichen', payload.kennzeichen],
-    ['Tarif', formatTarifLine(payload.tarif)],
+    ['Tarif', options?.tarifText ?? formatTarifLine(payload.tarif)],
     ['IBAN', payload.iban],
     ['BIC', payload.bic ?? '—'],
     ['Lautend auf', payload.lautend_auf],
@@ -118,8 +123,10 @@ type MailSendOptions = {
   applicantEmail?: string
   /** Direkt an diese Adresse (Bestätigung an Kund:in); dann kein automatisches Reply-To aus applicantEmail. */
   directTo?: string
-  /** Reply-To Header (z.&nbsp;B. Büroadresse bei Bestätigung an Antragsteller:in). */
+  /** Reply-To Header (z. B. Büroadresse bei Bestätigung an Antragsteller:in). */
   replyTo?: string
+  /** Kommagetrennte Büro-Empfänger, wenn nicht directTo. */
+  notifyTo?: string
 }
 
 /**
@@ -199,7 +206,10 @@ async function sendSmtpEmail(
   const user = process.env.MAIL_USER!
   const pass = process.env.MAIL_PASSWORD!.replace(/\s+/g, '')
   const from = resolveSmtpFromEnvelope()
-  const notifyTo = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
+  const notifyTo =
+    options?.notifyTo?.trim() ||
+    process.env.NOTIFY_TO ||
+    'office@parkhaus-elbl.at'
   const to = options?.directTo?.trim() || notifyTo
   const replyHeader =
     options?.replyTo?.trim() ||
@@ -234,8 +244,16 @@ async function sendResendEmail(
   options?: MailSendOptions,
 ) {
   const key = process.env.RESEND_API_KEY!
-  const notifyTo = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
-  const toAddr = options?.directTo?.trim() || notifyTo
+  const notifyRaw =
+    options?.notifyTo?.trim() ||
+    process.env.NOTIFY_TO ||
+    'office@parkhaus-elbl.at'
+  const notifyList = parseEmailList(notifyRaw)
+  const toAddr = options?.directTo?.trim()
+    ? [options.directTo.trim()]
+    : notifyList.length
+      ? notifyList
+      : [notifyRaw]
   const from = process.env.NOTIFY_FROM!
   const replyHeader =
     options?.replyTo?.trim() ||
@@ -244,7 +262,7 @@ async function sendResendEmail(
       : undefined)
   const body: Record<string, unknown> = {
     from,
-    to: [toAddr],
+    to: toAddr,
     ...(replyHeader ? { reply_to: replyHeader } : {}),
     subject,
     html,
@@ -277,12 +295,18 @@ async function sendMailWithAttachmentRetry(
   subj: string,
   mailAttachments: MailAttachment[],
   contractFromGoogle: ContractFromGoogle | undefined,
+  mailContext: { garageName: string; tarifText: string; notifyTo: string },
 ): Promise<void> {
-  const opts: MailSendOptions = { applicantEmail: data.email }
+  const opts: MailSendOptions = {
+    applicantEmail: data.email,
+    notifyTo: mailContext.notifyTo,
+  }
   const send = transport === 'resend' ? sendResendEmail : sendSmtpEmail
   let html = buildEmailHtml(data, {
     contractDocUrl: contractFromGoogle?.url,
     hasContractPdfAttachment: Boolean(contractFromGoogle?.pdfBuffer),
+    garageName: mailContext.garageName,
+    tarifText: mailContext.tarifText,
   })
   try {
     await send(html, subj, mailAttachments, opts)
@@ -295,6 +319,8 @@ async function sendMailWithAttachmentRetry(
       html = buildEmailHtml(data, {
         contractDocUrl: contractFromGoogle?.url,
         hasContractPdfAttachment: false,
+        garageName: mailContext.garageName,
+        tarifText: mailContext.tarifText,
       })
       await send(html, subj, [], opts)
     } else {
@@ -342,6 +368,9 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     })
     return json(200, { ok: true })
   }
+
+  const loaded = await loadCatalog()
+  setCatalog(loaded.publicCatalog)
 
   const parsed = applicationPayloadSchema.safeParse(raw)
   if (!parsed.success) {
@@ -400,31 +429,65 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
 
   if (hasDb) {
     const supabase = createClient(supabaseUrl!, serviceKey!)
-    const { data: inserted, error } = await supabase
+    const garage = loaded.publicCatalog.garagen.find((g) => g.id === data.garage)
+    const tarif = garage?.tarife.find((t) => t.id === data.tarif)
+    const row = {
+      name_firma: data.name_firma,
+      adresse: data.adresse,
+      telefon: data.telefon,
+      email: data.email,
+      stellplatz_nutzer: (() => {
+        const s = data.stellplatz_nutzer.trim()
+        return s.length > 0 ? s : null
+      })(),
+      beginn: data.beginn,
+      fahrzeug: data.fahrzeug,
+      kennzeichen: data.kennzeichen,
+      iban: data.iban,
+      bic: data.bic ?? null,
+      lautend_auf: data.lautend_auf,
+      tarif: data.tarif,
+      garage: data.garage,
+      tarif_label: tarif?.label ?? null,
+      garage_label: garage?.label ?? null,
+      garage_vertragsadresse: garage?.vertragsAdresse ?? null,
+      agb_akzeptiert: data.agb_akzeptiert,
+      sepa_akzeptiert: data.sepa_akzeptiert,
+      datenschutz_akzeptiert: data.datenschutz_akzeptiert,
+    }
+    let insertedResult = await supabase
       .from('dauerpark_antraege')
-      .insert({
-        name_firma: data.name_firma,
-        adresse: data.adresse,
-        telefon: data.telefon,
-        email: data.email,
-        stellplatz_nutzer: (() => {
-          const s = data.stellplatz_nutzer.trim()
-          return s.length > 0 ? s : null
-        })(),
-        beginn: data.beginn,
-        fahrzeug: data.fahrzeug,
-        kennzeichen: data.kennzeichen,
-        iban: data.iban,
-        bic: data.bic ?? null,
-        lautend_auf: data.lautend_auf,
-        tarif: data.tarif,
-        garage: data.garage,
-        agb_akzeptiert: data.agb_akzeptiert,
-        sepa_akzeptiert: data.sepa_akzeptiert,
-        datenschutz_akzeptiert: data.datenschutz_akzeptiert,
-      })
+      .insert(row)
       .select('id')
       .single()
+    if (
+      insertedResult.error &&
+      /column|schema cache/i.test(insertedResult.error.message)
+    ) {
+      insertedResult = await supabase
+        .from('dauerpark_antraege')
+        .insert({
+          name_firma: row.name_firma,
+          adresse: row.adresse,
+          telefon: row.telefon,
+          email: row.email,
+          stellplatz_nutzer: row.stellplatz_nutzer,
+          beginn: row.beginn,
+          fahrzeug: row.fahrzeug,
+          kennzeichen: row.kennzeichen,
+          iban: row.iban,
+          bic: row.bic,
+          lautend_auf: row.lautend_auf,
+          tarif: row.tarif,
+          garage: row.garage,
+          agb_akzeptiert: row.agb_akzeptiert,
+          sepa_akzeptiert: row.sepa_akzeptiert,
+          datenschutz_akzeptiert: row.datenschutz_akzeptiert,
+        })
+        .select('id')
+        .single()
+    }
+    const { data: inserted, error } = insertedResult
     if (error) {
       console.error('Supabase insert', {
         message: error.message,
@@ -458,6 +521,23 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
   }
 
   const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
+  const notifyList =
+    loaded.source === 'fallback'
+      ? parseEmailList(process.env.NOTIFY_TO ?? loaded.catalog.settings.notifyTo)
+      : parseEmailList(loaded.catalog.settings.notifyTo)
+  const notifyTo = (notifyList.length
+    ? notifyList
+    : parseEmailList(process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at')
+  ).join(', ')
+  const publicEmail =
+    loaded.publicCatalog.settings.publicEmail ||
+    notifyList[0] ||
+    'office@parkhaus-elbl.at'
+  const mailContext = {
+    garageName: garageLabel(data.garage, loaded),
+    tarifText: tarifLine(loaded.publicCatalog, data.tarif),
+    notifyTo,
+  }
 
   try {
     const mailChain: ('resend' | 'smtp')[] = []
@@ -474,6 +554,7 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
           subj,
           mailAttachments,
           contractFromGoogle,
+          mailContext,
         )
         mailOk = true
         break
@@ -496,17 +577,17 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
 
     /** Separates Bestätigung an Antragsteller:in — ohne Anhänge; schlägt nicht den gesamten Antrag fehl. */
     const applicantAddr = data.email.trim()
-    const notifyAddr = process.env.NOTIFY_TO ?? 'office@parkhaus-elbl.at'
     if (mailOk && mailChain.length > 0 && applicantAddr.length > 0) {
       const confirmHtml = buildApplicantConfirmationHtml(
         data.name_firma,
-        notifyAddr,
+        publicEmail,
       )
       const confirmSubj =
         'Bestätigung: Ihre Dauerpark-Anmeldung ist eingegangen'
       const confirmOpts: MailSendOptions = {
         directTo: applicantAddr,
-        replyTo: notifyAddr,
+        replyTo: publicEmail,
+        notifyTo,
       }
       let confirmOk = false
       let confirmLastErr: unknown
