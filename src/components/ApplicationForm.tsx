@@ -52,8 +52,6 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
     'idle',
   )
   const [message, setMessage] = useState('')
-  /** Server hat gespeichert, aber kein SMTP/Resend (Netlify env). */
-  const [mailSkipped, setMailSkipped] = useState(false)
 
   const {
     register,
@@ -98,7 +96,6 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
   const onSubmit = handleSubmit(async (data) => {
     setStatus('loading')
     setMessage('')
-    setMailSkipped(false)
     try {
       const res = await fetch(submitEndpoint(), {
         method: 'POST',
@@ -118,7 +115,6 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         setMessage(json.error || 'Senden fehlgeschlagen.')
         return
       }
-      setMailSkipped(Boolean(json.mailSkipped))
       setStatus('ok')
       setMessage(
         json.mailSkipped
@@ -375,9 +371,6 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         </button>
       </div>
 
-      {status === 'ok' && (
-        <p className={`banner ${mailSkipped ? 'warn' : 'ok'}`}>{message}</p>
-      )}
       {status === 'err' && <p className="banner err">{message}</p>}
     </form>
   )
