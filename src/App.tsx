@@ -6,27 +6,47 @@ import './App.css'
 function PublicApp() {
   const catalog = usePublicCatalog()
   return (
-    <div className="layout">
-      <header className="header">
-        <p className="brand">PARKHAUS ELBL</p>
+    <div className="elbl">
+      <div className="elbl-banner">
+        <img src="/legacy/images/Banner/Header_2500x400.jpg" alt="" />
+        <header className="elbl-top">
+          <a className="elbl-logo" href="https://www.parkhaus-elbl.at/">
+            <img
+              src="/legacy/images/Logos/P-Quadrat_200x200.png"
+              alt="Parkhaus Elbl"
+              width={75}
+              height={75}
+            />
+          </a>
+        </header>
+      </div>
+      <main className="elbl-main">
         <h1>Dauerparkplatz — Online-Anmeldung</h1>
         <p className="sub">
-          Bitte füllen Sie alle Felder aus. Preise inkl. 20 % UST.
+          Felder mit * sind erforderlich. Preise inkl. 20 % UST.
         </p>
-      </header>
-      <main>
         <ApplicationForm catalog={catalog} />
       </main>
-      <footer className="footer">
-        <a href={`mailto:${catalog.settings.publicEmail}`}>
-          {catalog.settings.publicEmail}
-        </a>
-        {' · '}
-        <a href="https://www.parkhaus-elbl.at" target="_blank" rel="noreferrer">
-          parkhaus-elbl.at
-        </a>
-        {' · '}
-        <a href="/admin">Verwaltung</a>
+      <footer className="elbl-foot">
+        <p className="slogan">
+          DIE <strong>SUCHE</strong> HAT EIN <strong>ENDE</strong>
+        </p>
+        <p className="copy">
+          Copyright by
+          <br />
+          <strong>PARKHAUS ELBL</strong>
+          <br />
+          Betriebsgesellschaft m.b.H.
+        </p>
+        <p className="foot-links">
+          <a href={`mailto:${catalog.settings.publicEmail}`}>
+            {catalog.settings.publicEmail}
+          </a>
+          {' · '}
+          <a href="https://www.parkhaus-elbl.at/">parkhaus-elbl.at</a>
+          {' · '}
+          <a href="/admin">Verwaltung</a>
+        </p>
       </footer>
     </div>
   )

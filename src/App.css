@@ -63,10 +63,11 @@
 }
 
 .form .lede {
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  color: var(--muted);
-  margin: 0 0 1.25rem;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 300;
+  color: #666;
+  margin: 12px 0 20px;
 }
 
 .form .lede a {
@@ -109,18 +110,18 @@
 }
 
 .field span:first-child {
-  font-weight: 500;
-  color: var(--text);
+  font-weight: 300;
+  color: #000;
 }
 
 .field input,
 .field select {
-  font: inherit;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
+  font: 300 16px/20px Oxygen, "Segoe UI", sans-serif;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 0;
+  background: #fff;
+  color: #666;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -196,19 +197,24 @@
   margin-top: 0.25rem;
 }
 
-.submit {
-  font: inherit;
-  font-weight: 600;
-  padding: 0.65rem 1.25rem;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
+.submit,
+a.button {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid #003c78;
+  border-radius: 4px;
+  background: #fff;
+  color: #003c78;
+  font: 300 16px/20px Oxygen, "Segoe UI", sans-serif;
+  text-decoration: none;
   cursor: pointer;
 }
 
-.submit:hover:not(:disabled) {
-  filter: brightness(1.05);
+.submit:hover:not(:disabled),
+a.button:hover {
+  border-color: #be3228;
+  color: #be3228;
 }
 
 .submit:disabled {
@@ -218,10 +224,60 @@
 
 .banner {
   margin-top: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  font-size: 0.875rem;
+  padding: 10px 0;
+  border-radius: 0;
+  font-size: 16px;
+  line-height: 20px;
 }
+
+.elbl-banner { position: relative; background: #12315f; }
+.elbl-banner > img { display: block; width: 100%; height: auto; }
+.elbl-top { position: absolute; inset: 0 auto auto 0; padding-left: 30px; }
+.elbl-logo img { width: 75px; height: 75px; margin-top: 30px; margin-bottom: 20px; }
+.elbl-main {
+  width: min(760px, calc(100% - 24px));
+  margin: 0 auto;
+  padding: 30px 0 48px;
+}
+@media (max-width: 720px) {
+  .elbl-main { padding-top: 72px; }
+}
+.elbl-main h1 {
+  margin: 0 0 12px;
+  padding-bottom: 5px;
+  border-bottom: 1px dotted #003c78;
+  color: #999;
+  font-family: Oxygen, "Segoe UI", sans-serif;
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 33px;
+}
+.elbl-main .sub { margin: 12px 0; color: #666; }
+.elbl-main a { color: #003c78; text-decoration: none; }
+.elbl-main a:hover { color: #be3228; }
+.done h2 {
+  margin: 0;
+  padding: 20px 0 10px;
+  color: #000;
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 36px;
+}
+.done p { margin: 12px 0; color: #666; font-size: 16px; line-height: 20px; }
+.elbl-foot {
+  background: #003c78 url("/legacy/images/Banner/Footer_2000x800.jpg") center / cover no-repeat;
+  color: #fff;
+  text-align: center;
+  padding: 30px 16px 24px;
+}
+.elbl-foot .slogan { margin: 12px 0; font-size: 24px; line-height: 30px; font-weight: 300; }
+.elbl-foot .slogan strong { font-weight: 700; }
+.elbl-foot .copy { margin: 12px 0; font-size: 14px; line-height: 20px; font-weight: 300; }
+.elbl-foot .copy strong { font-size: 18px; line-height: 20px; font-weight: 700; }
+.elbl-foot a { color: #fff; }
+.elbl-foot a:hover { color: #000; }
+.elbl-foot .foot-links { margin: 12px 0 0; font-size: 14px; line-height: 20px; }
+.check input { accent-color: #003c78; }
 
 .banner.ok {
   background: var(--ok-bg);

@@ -62,9 +62,9 @@ export function AntraegePanel({
               {new Date(row.created_at).toLocaleString('de-AT')} · Beginn {row.beginn}
             </div>
             <div>{labelFor(garagen, row.garage, row.tarif)}</div>
-            <div>
-              {row.fahrzeug} · {row.kennzeichen}
-            </div>
+            {[row.fahrzeug, row.kennzeichen].filter(Boolean).length > 0 && (
+              <div>{[row.fahrzeug, row.kennzeichen].filter(Boolean).join(' · ')}</div>
+            )}
             <div>
               <a href={`mailto:${row.email}`}>{row.email}</a>
               {row.telefon ? ` · ${row.telefon}` : ''}

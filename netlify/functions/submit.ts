@@ -520,7 +520,10 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     })
   }
 
-  const subj = `Dauerpark-Antrag: ${data.name_firma} — ${data.kennzeichen}`
+  const plate = data.kennzeichen.trim()
+  const subj = plate
+    ? `Dauerpark-Antrag: ${data.name_firma} — ${plate}`
+    : `Dauerpark-Antrag: ${data.name_firma}`
   const notifyList =
     loaded.source === 'fallback'
       ? parseEmailList(process.env.NOTIFY_TO ?? loaded.catalog.settings.notifyTo)

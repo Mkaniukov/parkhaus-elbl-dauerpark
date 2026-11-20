@@ -11,6 +11,12 @@ import {
 } from '../lib/constants'
 import type { PublicCatalog } from '../lib/catalogModel'
 
+function garageFromAddress(): string | null {
+  if (typeof window === 'undefined') return null
+  const id = new URLSearchParams(window.location.search).get('garage')?.trim()
+  return id || null
+}
+
 const defaultValues: ApplicationFormInput = {
   name_firma: '',
   adresse: '',
@@ -40,6 +46,8 @@ function submitEndpoint(): string {
 export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
   /** Honeypot: Wert nur beim Submit lesen (vermeidet Autofill/State-Fehler). */
   const companyWebsiteTrapRef = useRef<HTMLInputElement>(null)
+  const requestedGarage = useRef(garageFromAddress())
+  const appliedQuery = useRef(false)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>(
     'idle',
   )
@@ -67,9 +75,14 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
 
   useEffect(() => {
     const ids = catalog.garagen.map((g) => g.id)
-    const currentGarage = getValues('garage')
+    let currentGarage = getValues('garage')
+    const wanted = requestedGarage.current
+    if (!appliedQuery.current && ids.length > 0) {
+      appliedQuery.current = true
+      if (wanted && ids.includes(wanted)) currentGarage = wanted
+    }
     const gid = ids.includes(currentGarage) ? currentGarage : ids[0]
-    if (gid && gid !== currentGarage) {
+    if (gid && gid !== getValues('garage')) {
       setValue('garage', gid)
     }
     const list =
@@ -109,9 +122,10 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
       setStatus('ok')
       setMessage(
         json.mailSkipped
-          ? 'Ihre Daten wurden gespeichert. Es konnte keine E-Mail versendet werden (Server-Konfiguration: in Netlify unter „Environment variables“ → Production SMTP oder Resend eintragen, dann neu deployen).'
-          : 'Vielen Dank! Ihre Angaben wurden übermittelt.',
+          ? `Ihre Daten wurden gespeichert. Eine E-Mail konnte nicht versendet werden. Bitte schreiben Sie an ${catalog.settings.publicEmail}.`
+          : 'Eine Bestätigung wurde an Ihre E-Mail-Adresse gesendet.',
       )
+      window.scrollTo({ top: 0, behavior: 'smooth' })
       if (companyWebsiteTrapRef.current) companyWebsiteTrapRef.current.value = ''
       const firstGarage = catalog.garagen[0]
       reset({
@@ -133,6 +147,29 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
     )
   }
 
+  if (status === 'ok') {
+    return (
+      <article className="done">
+        <h2>Vielen Dank</h2>
+        <p>
+          Vielen Dank für Ihre Online-Anmeldung eines Dauerparkplatzes bei
+          Parkhaus ELBL.
+        </p>
+        <p>
+          Wir haben Ihre Daten erfolgreich erhalten und werden sie
+          schnellstmöglich bearbeiten. Bei offenen Punkten oder weiteren
+          Schritten meldet sich eine Kollegin oder ein Kollege bei Ihnen.
+        </p>
+        <p>{message}</p>
+        <p>
+          <a className="button" href="https://www.parkhaus-elbl.at/">
+            Zurück zur Website
+          </a>
+        </p>
+      </article>
+    )
+  }
+
   return (
     <form className="form" onSubmit={onSubmit} noValidate>
       <p className="lede">
@@ -140,10 +177,10 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         <a href={`mailto:${catalog.settings.publicEmail}`}>
           {catalog.settings.publicEmail}
         </a>{' '}
-        gesendet und in der Datenbank gespeichert. Kaution{' '}
-        {catalog.settings.kationEur} €. Mindestvertragsdauer{' '}
-        {catalog.settings.minVertragMonate} Monate.{' '}
-        {catalog.settings.kuendigungHinweis}
+        gesendet und in der Datenbank gespeichert.
+        {catalog.settings.kuendigungHinweis
+          ? ` ${catalog.settings.kuendigungHinweis}`
+          : ''}
       </p>
 
       <div className="field-grid">
@@ -213,7 +250,7 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         </label>
 
         <label className="field field-wide">
-          <span>Fahrzeug (Marke / Typ) *</span>
+          <span>Fahrzeug (Marke / Typ) (optional)</span>
           <input type="text" {...register('fahrzeug')} />
           {errors.fahrzeug && (
             <span className="err">{errors.fahrzeug.message}</span>
@@ -221,7 +258,7 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         </label>
 
         <label className="field">
-          <span>Kennzeichen *</span>
+          <span>Kennzeichen (optional)</span>
           <input type="text" autoComplete="off" {...register('kennzeichen')} />
           {errors.kennzeichen && (
             <span className="err">{errors.kennzeichen.message}</span>
@@ -241,12 +278,12 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         </label>
 
         <label className="field">
-          <span>IBAN (EU) *</span>
+          <span>IBAN *</span>
           <input
             type="text"
             inputMode="text"
             autoComplete="off"
-            placeholder="z. B. AT61 … oder DE89 …"
+            placeholder="z. B. AT61 …, DE89 … oder GB29 …"
             {...register('iban')}
           />
           {errors.iban && <span className="err">{errors.iban.message}</span>}

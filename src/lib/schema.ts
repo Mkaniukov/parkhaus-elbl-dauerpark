@@ -1,13 +1,13 @@
 import { z } from 'zod'
 import { getCatalog } from './catalogSnapshot'
-import { isValidEuIban, normalizeIban } from './iban'
+import { isValidEuropeanIban, normalizeIban } from './iban'
 
-/** IBAN eines EU-Mitgliedstaats (Länge je Land + MOD-97). */
+/** IBAN eines europäischen Landes, einschließlich GB (Länge je Land + MOD-97). */
 const ibanEu = z
   .string()
   .min(1, 'IBAN erforderlich')
   .transform(normalizeIban)
-  .refine(isValidEuIban, 'Ungültige IBAN (EU-Mitgliedstaat)')
+  .refine(isValidEuropeanIban, 'Ungültige IBAN')
 
 export const applicationPayloadSchema = z
   .object({
@@ -16,8 +16,8 @@ export const applicationPayloadSchema = z
     telefon: z.string().min(5, 'Telefonnummer'),
     email: z.string().email('Gültige E-Mail'),
     beginn: z.string().min(1, 'Beginn wählen'),
-    fahrzeug: z.string().min(2, 'Fahrzeug (Marke / Typ)'),
-    kennzeichen: z.string().min(2, 'Kennzeichen'),
+    fahrzeug: z.string().trim(),
+    kennzeichen: z.string().trim(),
     iban: ibanEu,
     bic: z
       .string()
