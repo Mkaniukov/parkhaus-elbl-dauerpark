@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   applicationPayloadSchema,
@@ -48,7 +48,7 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
   /** Honeypot: Wert nur beim Submit lesen (vermeidet Autofill/State-Fehler). */
   const companyWebsiteTrapRef = useRef<HTMLInputElement>(null)
   const requestedGarage = useRef(garageFromAddress())
-  const userChoseGarage = useRef(false)
+  const [pickedGarage, setPickedGarage] = useState<string | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>(
     'idle',
   )
@@ -57,7 +57,6 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
   const {
     register,
     handleSubmit,
-    control,
     setValue,
     getValues,
     formState: { errors },
@@ -70,32 +69,25 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
     },
   })
   const garageField = register('garage')
-
-  const garageWatch = useWatch({ control, name: 'garage' })
-  const garageId = garageWatch ?? catalog.garagen[0]?.id ?? DEFAULT_GARAGE_ID
+  const inCatalog = (id: string | null) =>
+    Boolean(id && catalog.garagen.some((garage) => garage.id === id))
+  const garageId = inCatalog(pickedGarage)
+    ? pickedGarage!
+    : inCatalog(requestedGarage.current)
+      ? requestedGarage.current!
+      : (catalog.garagen[0]?.id ?? DEFAULT_GARAGE_ID)
   const tarifeAktuell =
     catalog.garagen.find((g) => g.id === garageId)?.tarife ?? []
 
   useEffect(() => {
-    const ids = catalog.garagen.map((g) => g.id)
-    let currentGarage = getValues('garage')
-    const wanted = requestedGarage.current
-    if (!userChoseGarage.current && wanted && ids.includes(wanted)) {
-      currentGarage = wanted
-    }
-    const gid = ids.includes(currentGarage) ? currentGarage : ids[0]
-    if (gid && gid !== getValues('garage')) {
-      setValue('garage', gid)
-    }
-    const list =
-      catalog.garagen.find((g) => g.id === (gid ?? currentGarage))?.tarife ?? []
+    if (getValues('garage') !== garageId) setValue('garage', garageId)
+    const list = catalog.garagen.find((g) => g.id === garageId)?.tarife ?? []
     const first = list[0]?.id
     if (!first) return
-    const current = getValues('tarif')
-    if (!list.some((t) => t.id === current)) {
+    if (!list.some((t) => t.id === getValues('tarif'))) {
       setValue('tarif', first, { shouldValidate: true })
     }
-  }, [catalog, garageWatch, getValues, setValue])
+  }, [catalog, garageId, getValues, setValue])
 
   const onSubmit = handleSubmit(async (data) => {
     setStatus('loading')
@@ -251,10 +243,13 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         <label className="field">
           <span>Garage / Standort *</span>
           <select
-            {...garageField}
+            name={garageField.name}
+            ref={garageField.ref}
+            onBlur={garageField.onBlur}
+            value={garageId}
             onChange={(event) => {
-              userChoseGarage.current = true
-              void garageField.onChange(event)
+              setPickedGarage(event.target.value)
+              setValue('garage', event.target.value, { shouldValidate: true })
             }}
           >
             {catalog.garagen.map((g) => (
