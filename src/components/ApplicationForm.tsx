@@ -76,8 +76,9 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
     : inCatalog(requestedGarage.current)
       ? requestedGarage.current!
       : (catalog.garagen[0]?.id ?? DEFAULT_GARAGE_ID)
-  const tarifeAktuell =
-    catalog.garagen.find((g) => g.id === garageId)?.tarife ?? []
+  const gewaehlteGarage = catalog.garagen.find((g) => g.id === garageId)
+  const tarifeAktuell = gewaehlteGarage?.tarife ?? []
+  const garageKaution = gewaehlteGarage?.kationEur
 
   useEffect(() => {
     if (getValues('garage') !== garageId) setValue('garage', garageId)
@@ -260,6 +261,11 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
           </select>
           {errors.garage && (
             <span className="err">{errors.garage.message}</span>
+          )}
+          {typeof garageKaution === 'number' && Number.isFinite(garageKaution) && (
+            <span className="hint">
+              Kaution € {garageKaution.toLocaleString('de-AT', { minimumFractionDigits: 2 })}
+            </span>
           )}
         </label>
 

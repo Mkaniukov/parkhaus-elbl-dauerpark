@@ -80,13 +80,16 @@ export function SettingsPanel({
           </span>
         </label>
         <label>
-          Kaution (€)
+          Kaution, falls die Garage keinen eigenen Betrag hat (€)
           <input
             inputMode="decimal"
             value={draft.kationEur}
             disabled={!writable}
             onChange={(e) => patch({ kationEur: Number(e.target.value.replace(',', '.')) })}
           />
+          <span className="hint">
+            Steht nur im Vertrag, wenn bei der Garage das Feld Kaution leer ist. Die Website zeigt den Betrag der Garage.
+          </span>
         </label>
         <label>
           Mindestlaufzeit (Monate)

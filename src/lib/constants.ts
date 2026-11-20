@@ -299,6 +299,16 @@ export function formatTarifLine(tarifId: string): string {
 }
 
 export const KAUTION_EUR = 400
+
+/**
+ * Beträge, die auf den Garagenseiten stehen.
+ * Garagen ohne Eintrag nennen keine Kaution.
+ */
+export const KAUTION_EUR_BY_GARAGE: Readonly<Record<string, number>> = {
+  '1010-posthoefe': 400,
+  '1190-skyline': 200,
+  '1220-reichsbruecke': 200,
+}
 export const MIN_VERTRAG_MONATE = 3
 export const KUENDIGUNG_HINWEIS =
   'Mindestvertragsdauer 3 Monate, Kündigungsfrist ein Monat zum Monatsletzten.'

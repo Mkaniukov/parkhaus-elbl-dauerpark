@@ -2,6 +2,7 @@ import {
   AGB_PDF_URL,
   GARAGEN,
   KAUTION_EUR,
+  KAUTION_EUR_BY_GARAGE,
   KUENDIGUNG_HINWEIS,
   MIN_VERTRAG_MONATE,
 } from './constants'
@@ -22,7 +23,23 @@ export type CatalogGarage = {
   vertragsAdresse: string
   active: boolean
   sortOrder: number
+  /** null: für diese Garage ist kein Betrag veröffentlicht. */
+  kationEur: number | null
   tarife: CatalogTarif[]
+}
+
+/** Liest eine optionale Kaution. Ungültige Werte werden null. */
+export function readKation(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim().replace(',', '.'))
+  if (!Number.isFinite(n) || n < 0 || n > 10000) return null
+  return n
+}
+
+/** Fehlendes Feld bekommt den bekannten Seitenbetrag, ein leeres Feld bleibt leer. */
+export function kationForGarage(id: string, raw: unknown): number | null {
+  if (raw === undefined) return KAUTION_EUR_BY_GARAGE[id] ?? null
+  return readKation(raw)
 }
 
 export type PublicSettings = {
@@ -56,6 +73,7 @@ export function fallbackCatalog(): FullCatalog {
       vertragsAdresse: g.vertragsAdresse,
       active: true,
       sortOrder: i,
+      kationEur: KAUTION_EUR_BY_GARAGE[g.id] ?? null,
       tarife: g.tarife.map((t, j) => ({
         id: t.id,
         label: t.label,

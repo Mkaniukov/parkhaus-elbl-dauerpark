@@ -20,6 +20,7 @@ type GarageDraft = {
   id?: string
   label: string
   vertragsAdresse: string
+  kation: string
   active: boolean
   tarife: TarifDraft[]
 }
@@ -33,6 +34,7 @@ function fromGarage(garage: CatalogGarage): GarageDraft {
     id: garage.id,
     label: garage.label,
     vertragsAdresse: garage.vertragsAdresse,
+    kation: garage.kationEur == null ? '' : String(garage.kationEur).replace('.', ','),
     active: garage.active,
     tarife: garage.tarife
       .slice()
@@ -55,6 +57,7 @@ function blankGarage(): GarageDraft {
   return {
     label: '',
     vertragsAdresse: '',
+    kation: '',
     active: true,
     tarife: [blankTarif()],
   }
@@ -194,6 +197,7 @@ function GarageEditor({
             id: draft.id,
             label: draft.label,
             vertragsAdresse: draft.vertragsAdresse,
+            kationEur: draft.kation.trim() === '' ? null : draft.kation,
             active: draft.active,
             tarife: draft.tarife.map((t) => ({
               id: t.id,
@@ -259,6 +263,17 @@ function GarageEditor({
             disabled={!writable}
             onChange={(e) => setDraft({ ...draft, vertragsAdresse: e.target.value })}
           />
+        </label>
+        <label>
+          Kaution (€)
+          <input
+            inputMode="decimal"
+            value={draft.kation}
+            disabled={!writable}
+            placeholder="leer, wenn kein Betrag"
+            onChange={(e) => setDraft({ ...draft, kation: e.target.value })}
+          />
+          <span className="hint">Leer lassen, wenn auf der Website kein Betrag stehen soll.</span>
         </label>
       </div>
       <label className="check-inline">

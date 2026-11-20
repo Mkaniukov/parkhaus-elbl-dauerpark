@@ -240,29 +240,45 @@ async function contractCatalogExtras(
     const label = (tarif.data as { label?: string } | null)?.label
     if (!tarif.error && label?.trim()) out.tarifLabel = label.trim()
   }
-  if (!out.garageVertragsadresse || !out.garageLabel) {
-    const garage = await supabase
+  const garage = await supabase
+    .from("garagen")
+    .select("label, vertrags_adresse, kation_eur")
+    .eq("id", r.garage)
+    .maybeSingle()
+  let rowG = garage.data as {
+    label?: string
+    vertrags_adresse?: string
+    kation_eur?: number | string | null
+  } | null
+  if (garage.error && /kation_eur/i.test(garage.error.message ?? "")) {
+    const retry = await supabase
       .from("garagen")
       .select("label, vertrags_adresse")
       .eq("id", r.garage)
       .maybeSingle()
-    const rowG = garage.data as { label?: string; vertrags_adresse?: string } | null
-    if (!garage.error && rowG) {
-      if (!out.garageLabel && rowG.label?.trim()) out.garageLabel = rowG.label.trim()
-      if (!out.garageVertragsadresse && rowG.vertrags_adresse?.trim()) {
-        out.garageVertragsadresse = rowG.vertrags_adresse.trim()
-      }
+    rowG = (retry.data ?? null) as typeof rowG
+  }
+  if (rowG) {
+    if (!out.garageLabel && rowG.label?.trim()) out.garageLabel = rowG.label.trim()
+    if (!out.garageVertragsadresse && rowG.vertrags_adresse?.trim()) {
+      out.garageVertragsadresse = rowG.vertrags_adresse.trim()
+    }
+    if (rowG.kation_eur != null && String(rowG.kation_eur).trim() !== "") {
+      const n = Number(String(rowG.kation_eur).trim().replace(",", "."))
+      if (Number.isFinite(n) && n >= 0) out.kaution = formatEURdeAT(n)
     }
   }
-  const kaution = await supabase
-    .from("app_settings")
-    .select("value")
-    .eq("key", "kation_eur")
-    .maybeSingle()
-  const raw = (kaution.data as { value?: string } | null)?.value
-  if (!kaution.error && raw?.trim()) {
-    const n = Number(raw.trim().replace(",", "."))
-    if (Number.isFinite(n) && n >= 0) out.kaution = formatEURdeAT(n)
+  if (!out.kaution) {
+    const kaution = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "kation_eur")
+      .maybeSingle()
+    const raw = (kaution.data as { value?: string } | null)?.value
+    if (!kaution.error && raw?.trim()) {
+      const n = Number(raw.trim().replace(",", "."))
+      if (Number.isFinite(n) && n >= 0) out.kaution = formatEURdeAT(n)
+    }
   }
   return out
 }

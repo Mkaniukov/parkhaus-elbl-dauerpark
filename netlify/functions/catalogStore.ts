@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
   composeTarifLabel,
   fallbackCatalog,
+  kationForGarage,
   normalizePrice,
   parseEmailList,
   slugify,
@@ -33,6 +34,7 @@ type GarageRow = {
   vertrags_adresse: string
   sort_order: number
   active: boolean
+  kation_eur?: number | string | null
 }
 
 type TarifRow = {
@@ -121,6 +123,7 @@ function rowsToCatalog(
         vertragsAdresse: g.vertrags_adresse,
         active: g.active,
         sortOrder: g.sort_order,
+        kationEur: kationForGarage(g.id, 'kation_eur' in g ? g.kation_eur : undefined),
         tarife: (byGarage.get(g.id) ?? []).sort((a, b) => a.sortOrder - b.sortOrder),
       }))
       .sort((a, b) => a.sortOrder - b.sortOrder),
@@ -162,6 +165,7 @@ function normalizeCatalog(raw: FullCatalog): FullCatalog {
       vertragsAdresse: g.vertragsAdresse,
       active: g.active !== false,
       sortOrder: typeof g.sortOrder === 'number' ? g.sortOrder : i,
+      kationEur: kationForGarage(g.id, 'kationEur' in g ? g.kationEur : undefined),
       tarife: (g.tarife ?? []).map((t, j) => ({
         id: t.id,
         label: t.label,
@@ -213,14 +217,7 @@ async function writeFileCatalog(catalog: FullCatalog): Promise<void> {
 
 async function seedSupabase(client: SupabaseClient, seed: FullCatalog): Promise<void> {
   const now = new Date().toISOString()
-  const garagen = seed.garagen.map((g) => ({
-    id: g.id,
-    label: g.label,
-    vertrags_adresse: g.vertragsAdresse,
-    sort_order: g.sortOrder,
-    active: g.active,
-    updated_at: now,
-  }))
+  const garagen = seed.garagen.map((g) => garageDbRow(g, now))
   const tarife = seed.garagen.flatMap((g) =>
     g.tarife.map((t) => ({
       id: t.id,
@@ -232,8 +229,7 @@ async function seedSupabase(client: SupabaseClient, seed: FullCatalog): Promise<
       updated_at: now,
     })),
   )
-  const gRes = await client.from('garagen').upsert(garagen, { onConflict: 'id' })
-  if (gRes.error) throw new Error(gRes.error.message)
+  await upsertGaragen(client, garagen)
   const tRes = await client.from('tarife').upsert(tarife, { onConflict: 'id' })
   if (tRes.error) throw new Error(tRes.error.message)
   const sRes = await client.from('app_settings').upsert(
@@ -352,14 +348,7 @@ async function persist(catalog: FullCatalog): Promise<void> {
   }
   const client = supabase()
   const now = new Date().toISOString()
-  const garageRows = catalog.garagen.map((g) => ({
-    id: g.id,
-    label: g.label,
-    vertrags_adresse: g.vertragsAdresse,
-    sort_order: g.sortOrder,
-    active: g.active,
-    updated_at: now,
-  }))
+  const garageRows = catalog.garagen.map((g) => garageDbRow(g, now))
   const tarifRows = catalog.garagen.flatMap((g) =>
     g.tarife.map((t) => ({
       id: t.id,
@@ -372,8 +361,7 @@ async function persist(catalog: FullCatalog): Promise<void> {
     })),
   )
   if (garageRows.length > 0) {
-    const gUp = await client.from('garagen').upsert(garageRows, { onConflict: 'id' })
-    if (gUp.error) throw new Error(gUp.error.message)
+    await upsertGaragen(client, garageRows)
   }
   if (tarifRows.length > 0) {
     const tUp = await client.from('tarife').upsert(tarifRows, { onConflict: 'id' })
@@ -417,7 +405,58 @@ export type GarageInput = {
   label: string
   vertragsAdresse: string
   active?: boolean
+  /** null oder leer: kein veröffentlichter Betrag. */
+  kationEur?: number | string | null
   tarife: TarifInput[]
+}
+
+type GarageDbRow = {
+  id: string
+  label: string
+  vertrags_adresse: string
+  sort_order: number
+  active: boolean
+  updated_at: string
+  kation_eur: number | null
+}
+
+function garageDbRow(g: CatalogGarage, updatedAt: string): GarageDbRow {
+  return {
+    id: g.id,
+    label: g.label,
+    vertrags_adresse: g.vertragsAdresse,
+    sort_order: g.sortOrder,
+    active: g.active,
+    updated_at: updatedAt,
+    kation_eur: g.kationEur,
+  }
+}
+
+function missingKationColumn(error: { message?: string } | null): boolean {
+  const msg = error?.message ?? ''
+  return /kation_eur/i.test(msg)
+}
+
+async function upsertGaragen(
+  client: SupabaseClient,
+  rows: GarageDbRow[],
+): Promise<void> {
+  const res = await client.from('garagen').upsert(rows, { onConflict: 'id' })
+  if (!res.error) return
+  if (!missingKationColumn(res.error)) throw new Error(res.error.message)
+  const slim = rows.map(({ kation_eur: _kation, ...rest }) => rest)
+  const retry = await client.from('garagen').upsert(slim, { onConflict: 'id' })
+  if (retry.error) throw new Error(retry.error.message)
+}
+
+function kationFromInput(raw: unknown, existing: number | null): number | null {
+  if (raw === undefined) return existing
+  if (raw === null || (typeof raw === 'string' && raw.trim() === '')) return null
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim().replace(',', '.'))
+  if (!Number.isFinite(n) || n < 0 || n > 10000) {
+    throw new Error('Kaution zwischen 0 und 10.000 €, oder leer.')
+  }
+  return n
 }
 
 function cleanTarife(
@@ -485,12 +524,14 @@ export async function saveGarage(input: GarageInput): Promise<LoadedCatalog> {
       .flatMap((g) => g.tarife.map((t) => t.id)),
   )
   const tarife = cleanTarife(id, input.tarife ?? [], own, others)
+  const kationEur = kationFromInput(input.kationEur, existing?.kationEur ?? null)
   const nextGarage: CatalogGarage = {
     id,
     label,
     vertragsAdresse,
     active: input.active !== false,
     sortOrder: existing?.sortOrder ?? catalog.garagen.length,
+    kationEur,
     tarife,
   }
   const garagen = existing
