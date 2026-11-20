@@ -54,6 +54,7 @@ export async function buildAntragDocx(
   const rows: [string, string][] = [
     ['Name / Firma', payload.name_firma],
     ['Adresse', payload.adresse],
+    ['PLZ / Ort', payload.plz_ort],
     ['Telefon', payload.telefon],
     ['E-Mail', payload.email],
     ['Stellplatz-Nutzer', payload.stellplatz_nutzer.trim() || '—'],

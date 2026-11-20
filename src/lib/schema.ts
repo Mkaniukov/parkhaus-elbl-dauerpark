@@ -12,7 +12,8 @@ const ibanEu = z
 export const applicationPayloadSchema = z
   .object({
     name_firma: z.string().min(2, 'Name oder Firma angeben'),
-    adresse: z.string().min(4, 'Vollständige Adresse'),
+    adresse: z.string().min(4, 'Straße und Hausnummer'),
+    plz_ort: z.string().trim().min(4, 'PLZ und Ort'),
     telefon: z.string().min(5, 'Telefonnummer'),
     email: z.string().email('Gültige E-Mail'),
     beginn: z.string().min(1, 'Beginn wählen'),

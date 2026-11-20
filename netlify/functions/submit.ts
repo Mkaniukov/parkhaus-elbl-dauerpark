@@ -45,6 +45,7 @@ function buildEmailHtml(
   const rows: [string, string][] = [
     ['Name / Firma', payload.name_firma],
     ['Adresse', payload.adresse],
+    ['PLZ / Ort', payload.plz_ort],
     ['Telefon', payload.telefon],
     ['E-Mail', payload.email],
     ['Stellplatz-Nutzer', payload.stellplatz_nutzer.trim() || '—'],
@@ -433,7 +434,7 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     const tarif = garage?.tarife.find((t) => t.id === data.tarif)
     const row = {
       name_firma: data.name_firma,
-      adresse: data.adresse,
+      adresse: [data.adresse.trim(), data.plz_ort.trim()].filter(Boolean).join(', '),
       telefon: data.telefon,
       email: data.email,
       stellplatz_nutzer: (() => {

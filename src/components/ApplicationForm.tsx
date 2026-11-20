@@ -20,6 +20,7 @@ function garageFromAddress(): string | null {
 const defaultValues: ApplicationFormInput = {
   name_firma: '',
   adresse: '',
+  plz_ort: '',
   telefon: '',
   email: '',
   beginn: '',
@@ -47,7 +48,7 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
   /** Honeypot: Wert nur beim Submit lesen (vermeidet Autofill/State-Fehler). */
   const companyWebsiteTrapRef = useRef<HTMLInputElement>(null)
   const requestedGarage = useRef(garageFromAddress())
-  const appliedQuery = useRef(false)
+  const userChoseGarage = useRef(false)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>(
     'idle',
   )
@@ -63,8 +64,12 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
     reset,
   } = useForm<ApplicationFormInput>({
     resolver: zodResolver(applicationPayloadSchema),
-    defaultValues,
+    defaultValues: {
+      ...defaultValues,
+      garage: requestedGarage.current ?? defaultValues.garage,
+    },
   })
+  const garageField = register('garage')
 
   const garageWatch = useWatch({ control, name: 'garage' })
   const garageId = garageWatch ?? catalog.garagen[0]?.id ?? DEFAULT_GARAGE_ID
@@ -75,9 +80,8 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
     const ids = catalog.garagen.map((g) => g.id)
     let currentGarage = getValues('garage')
     const wanted = requestedGarage.current
-    if (!appliedQuery.current && ids.length > 0) {
-      appliedQuery.current = true
-      if (wanted && ids.includes(wanted)) currentGarage = wanted
+    if (!userChoseGarage.current && wanted && ids.includes(wanted)) {
+      currentGarage = wanted
     }
     const gid = ids.includes(currentGarage) ? currentGarage : ids[0]
     if (gid && gid !== getValues('garage')) {
@@ -180,7 +184,7 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
       </p>
 
       <div className="field-grid">
-        <label className="field">
+        <label className="field field-wide">
           <span>Name / Firma *</span>
           <input type="text" autoComplete="name" {...register('name_firma')} />
           {errors.name_firma && (
@@ -193,6 +197,19 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
           <input type="text" autoComplete="street-address" {...register('adresse')} />
           {errors.adresse && (
             <span className="err">{errors.adresse.message}</span>
+          )}
+        </label>
+
+        <label className="field">
+          <span>PLZ / Ort *</span>
+          <input
+            type="text"
+            autoComplete="postal-code"
+            placeholder="z. B. 1070 Wien"
+            {...register('plz_ort')}
+          />
+          {errors.plz_ort && (
+            <span className="err">{errors.plz_ort.message}</span>
           )}
         </label>
 
@@ -233,7 +250,13 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
 
         <label className="field">
           <span>Garage / Standort *</span>
-          <select {...register('garage')}>
+          <select
+            {...garageField}
+            onChange={(event) => {
+              userChoseGarage.current = true
+              void garageField.onChange(event)
+            }}
+          >
             {catalog.garagen.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.label}
