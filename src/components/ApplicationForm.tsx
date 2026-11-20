@@ -393,6 +393,9 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
         >
           {status === 'loading' ? 'Wird gesendet…' : 'Antrag senden'}
         </button>
+        {status === 'loading' && (
+          <p className="send-note">Vertrag wird erstellt, das kann einen Moment dauern.</p>
+        )}
       </div>
 
       {status === 'err' && <p className="banner err">{message}</p>}
