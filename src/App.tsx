@@ -44,8 +44,6 @@ function PublicApp() {
           </a>
           {' · '}
           <a href="https://www.parkhaus-elbl.at/">parkhaus-elbl.at</a>
-          {' · '}
-          <a href="/admin">Verwaltung</a>
         </p>
       </footer>
     </div>
