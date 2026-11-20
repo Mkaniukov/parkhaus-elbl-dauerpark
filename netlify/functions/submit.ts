@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import nodemailer from 'nodemailer'
@@ -420,13 +421,7 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
     )
   }
 
-  /** Vor PDF-Anhang ging die Mail schneller. Nur bei `MAIL_INCLUDE_CONTRACT_PDF=true`: großes PDF aus der Edge Function + Anhang (Timeout/SMTP-Risiko). */
-  const mailIncludeContractPdf =
-    process.env.MAIL_INCLUDE_CONTRACT_PDF === 'true'
-
-  const shouldMail = hasSmtp || hasResend
-
-  let contractFromGoogle: ContractFromGoogle | undefined
+  let recordId: string | null = null
 
   if (hasDb) {
     const supabase = createClient(supabaseUrl!, serviceKey!)
@@ -498,19 +493,108 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
       })
       return json(500, { ok: false, error: 'Speichern fehlgeschlagen.' })
     }
-    const contractPromise =
-      inserted?.id && process.env.SKIP_GENERATE_CONTRACT !== 'true'
-        ? fetchGenerateContract(
-            supabaseUrl!,
-            serviceKey!,
-            inserted.id,
-            mailIncludeContractPdf,
-          )
-        : Promise.resolve(undefined as ContractFromGoogle | undefined)
+    recordId = inserted?.id ?? null
+  }
 
-    contractFromGoogle = await contractPromise
-  } else {
-    contractFromGoogle = undefined
+  const queued = await queueDelivery({ data, recordId })
+  if (queued) {
+    return json(200, { ok: true, mailSkipped: !hasSmtp && !hasResend })
+  }
+
+  console.warn('submit: Hintergrundversand nicht gestartet, Versand in der Anfrage')
+  const delivered = await deliverSavedApplication({ data, recordId })
+  if (!delivered.ok) return json(delivered.status, { ok: false, error: delivered.error })
+  return json(200, { ok: true, mailSkipped: delivered.mailSkipped })
+}
+
+type DeliveryJob = {
+  data: ApplicationPayload
+  recordId: string | null
+}
+
+type DeliveryResult =
+  | { ok: true; mailSkipped: boolean }
+  | { ok: false; status: number; error: string }
+
+function internalSecret(): string | undefined {
+  const value =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_SECRET_KEY ??
+    process.env.MAIL_PASSWORD ??
+    process.env.RESEND_API_KEY
+  const trimmed = value?.replace(/\s+/g, '')
+  return trimmed || undefined
+}
+
+export function deliveryAuthorized(header: string | undefined): boolean {
+  const secret = internalSecret()
+  if (!secret || !header) return false
+  const expected = Buffer.from(secret)
+  const got = Buffer.from(header)
+  if (expected.length !== got.length) return false
+  return timingSafeEqual(expected, got)
+}
+
+function siteBase(): string {
+  const raw =
+    process.env.DEPLOY_PRIME_URL ??
+    process.env.URL ??
+    process.env.DEPLOY_URL ??
+    'http://127.0.0.1:8888'
+  return raw.replace(/\/$/, '')
+}
+
+/** Startet die Background Function. 202 heißt: Netlify arbeitet weiter, der Besucher muss nicht warten. */
+async function queueDelivery(job: DeliveryJob): Promise<boolean> {
+  if (!internalSecret()) return false
+  const url = `${siteBase()}/.netlify/functions/deliver-application-background`
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-elbl-job': internalSecret()!,
+      },
+      body: JSON.stringify(job),
+      signal: AbortSignal.timeout(12_000),
+    })
+    if (response.status === 202 || response.status === 200) {
+      console.info('submit: Vertrag und E-Mails im Hintergrund', response.status)
+      return true
+    }
+    const text = await response.text()
+    console.error('submit: Hintergrundversand abgelehnt', response.status, text.slice(0, 300))
+    return false
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === 'AbortError'
+    console.error('submit: Hintergrundversand nicht erreichbar', error)
+    // Timeout: die Function kann schon laufen. Nicht ein zweites Mal Vertrag und Mails erzeugen.
+    return aborted
+  }
+}
+
+/** Google-Dokument und beide E-Mails. Läuft nach der Antwort an den Besucher. */
+export async function deliverSavedApplication(input: DeliveryJob): Promise<DeliveryResult> {
+  const { data, recordId } = input
+  const loaded = await loadCatalog()
+  setCatalog(loaded.publicCatalog)
+
+  const supabaseUrl = process.env.SUPABASE_URL
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY
+  const hasDb = Boolean(supabaseUrl && serviceKey && recordId)
+  const hasSmtp = Boolean(process.env.MAIL_USER && process.env.MAIL_PASSWORD)
+  const hasResend = Boolean(process.env.RESEND_API_KEY && process.env.NOTIFY_FROM)
+  const mailIncludeContractPdf = process.env.MAIL_INCLUDE_CONTRACT_PDF === 'true'
+
+  let contractFromGoogle: ContractFromGoogle | undefined
+  if (hasDb && process.env.SKIP_GENERATE_CONTRACT !== 'true') {
+    contractFromGoogle = await fetchGenerateContract(
+      supabaseUrl!,
+      serviceKey!,
+      recordId!,
+      mailIncludeContractPdf,
+    )
   }
 
   const mailAttachments: MailAttachment[] = []
@@ -579,15 +663,10 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
       )
     }
 
-    /** Separates Bestätigung an Antragsteller:in — ohne Anhänge; schlägt nicht den gesamten Antrag fehl. */
     const applicantAddr = data.email.trim()
     if (mailOk && mailChain.length > 0 && applicantAddr.length > 0) {
-      const confirmHtml = buildApplicantConfirmationHtml(
-        data.name_firma,
-        publicEmail,
-      )
-      const confirmSubj =
-        'Bestätigung: Ihre Dauerpark-Anmeldung ist eingegangen'
+      const confirmHtml = buildApplicantConfirmationHtml(data.name_firma, publicEmail)
+      const confirmSubj = 'Bestätigung: Ihre Dauerpark-Anmeldung ist eingegangen'
       const confirmOpts: MailSendOptions = {
         directTo: applicantAddr,
         replyTo: publicEmail,
@@ -603,10 +682,7 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
           break
         } catch (e) {
           confirmLastErr = e
-          console.error(
-            `submit: Bestätigung an Antragsteller:in via ${t} fehlgeschlagen`,
-            e,
-          )
+          console.error(`submit: Bestätigung an Antragsteller:in via ${t} fehlgeschlagen`, e)
         }
       }
       if (!confirmOk) {
@@ -619,14 +695,14 @@ async function handleSubmit(event: Parameters<Handler>[0]) {
   } catch (e) {
     console.error(e)
     const hint = publicMailErrorHint(e)
-    return json(500, {
+    return {
       ok: false,
+      status: 500,
       error: hint ?? 'E-Mail konnte nicht gesendet werden.',
-    })
+    }
   }
 
-  const mailSkipped = !hasSmtp && !hasResend
-  return json(200, { ok: true, mailSkipped })
+  return { ok: true, mailSkipped: !hasSmtp && !hasResend }
 }
 
 /** Edge Function generate-contract: Doc + URL in DB; optional PDF für Mail-Anhang (teuer bei Timeout/SMTP). */

@@ -116,7 +116,7 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
       setMessage(
         json.mailSkipped
           ? `Ihre Daten wurden gespeichert. Eine E-Mail konnte nicht versendet werden. Bitte schreiben Sie an ${catalog.settings.publicEmail}.`
-          : 'Eine Bestätigung wurde an Ihre E-Mail-Adresse gesendet.',
+          : 'Eine Bestätigung wird in Kürze an Ihre E-Mail-Adresse gesendet.',
       )
       window.scrollTo({ top: 0, behavior: 'smooth' })
       if (companyWebsiteTrapRef.current) companyWebsiteTrapRef.current.value = ''
@@ -394,7 +394,7 @@ export function ApplicationForm({ catalog }: { catalog: PublicCatalog }) {
           {status === 'loading' ? 'Wird gesendet…' : 'Antrag senden'}
         </button>
         {status === 'loading' && (
-          <p className="send-note">Vertrag wird erstellt, das kann einen Moment dauern.</p>
+          <p className="send-note">Ihre Anmeldung wird gespeichert.</p>
         )}
       </div>
 
